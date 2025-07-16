@@ -9,8 +9,8 @@ RUN apt-get update && \
     python3-pip && \
     rm -rf /var/lib/apt/lists/*
 
-# Install yt-dlp via pip
-RUN pip3 install yt-dlp
+# Install yt-dlp with Debian override flag
+RUN pip3 install yt-dlp --break-system-packages
 
 # Create working directory
 WORKDIR /app
