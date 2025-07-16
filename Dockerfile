@@ -1,25 +1,32 @@
-# Use Node.js base image
-FROM node:18
+# Base image
+FROM node:18-slim
 
-# Install yt-dlp and ffmpeg
+# Install dependencies: ffmpeg, python3, pip
 RUN apt-get update && \
-    apt-get install -y ffmpeg python3 python3-pip && \
-    pip3 install yt-dlp
+    apt-get install -y --no-install-recommends \
+    ffmpeg \
+    python3 \
+    python3-pip && \
+    rm -rf /var/lib/apt/lists/*
 
-# Create app directory
+# Install yt-dlp via pip
+RUN pip3 install yt-dlp
+
+# Create working directory
 WORKDIR /app
 
-# Copy files
-COPY . .
-
-# Install dependencies
+# Copy package files and install deps first (for better caching)
+COPY package*.json ./
 RUN npm install
 
-# Build Next.js app
+# Copy rest of the app
+COPY . .
+
+# Build app
 RUN npm run build
 
 # Expose port
 EXPOSE 3000
 
-# Start the server
+# Start server
 CMD ["npm", "start"]
