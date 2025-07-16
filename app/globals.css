@@ -14,6 +14,14 @@ html {
   border-radius: 10px;
 }
 
+select::-webkit-scrollbar {
+  width: 4px;
+}
+select::-webkit-scrollbar-thumb {
+  background: rgba(63, 66, 62, 0.8);
+  border-radius: 4px;
+}
+
 @theme inline {
   --radius-sm: calc(var(--radius) - 4px);
   --radius-md: calc(var(--radius) - 2px);
