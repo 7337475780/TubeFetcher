@@ -6,6 +6,7 @@ import os from "os";
 import { promisify } from "util";
 
 const execAsync = promisify(exec);
+const ytDlpPath = "yt-dlp";
 
 export async function POST(req: NextRequest) {
   try {
