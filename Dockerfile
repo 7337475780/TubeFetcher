@@ -1,28 +1,36 @@
-# Use Node.js with system dependencies
+# Use official Node.js base image
 FROM node:20-slim
 
 # Set working directory
 WORKDIR /app
 
-# Install system dependencies
+# Install dependencies: Python, ffmpeg, pip, curl
 RUN apt-get update && \
-    apt-get install -y ffmpeg python3 python3-pip curl gnupg ca-certificates && \
-    pip3 install --no-cache-dir yt-dlp && \
-    apt-get clean && \
-    rm -rf /var/lib/apt/lists/*
+    apt-get install -y --no-install-recommends \
+    ffmpeg \
+    python3 \
+    python3-pip \
+    curl \
+    ca-certificates \
+    gnupg \
+    && pip3 install --no-cache-dir yt-dlp \
+    && apt-get clean \
+    && rm -rf /var/lib/apt/lists/*
 
-# Copy Node.js dependencies
+# Copy only package.json and lockfile first (for caching)
 COPY package*.json ./
+
+# Install Node.js dependencies
 RUN npm install
 
-# Copy entire app
+# Copy full application
 COPY . .
 
-# Build the Next.js app
+# Next.js standalone build
 RUN npm run build
 
-# Expose the Next.js server port
+# Expose port
 EXPOSE 3000
 
-# Start the app
+# Start app
 CMD ["npm", "start"]
