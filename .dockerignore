@@ -1,5 +1,14 @@
 node_modules
 .next
+tmp
+*.log
 Dockerfile
-.dockerignore
+docker-compose.yml
+.env
+.vscode
+.git
+.gitignore
 README.md
+yt-dlp.exe
+*.log
+.DS_Store

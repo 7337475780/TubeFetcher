@@ -4,8 +4,12 @@ import fs from "fs";
 import path from "path";
 import os from "os";
 import { promisify } from "util";
+import shellQuote from "shell-quote";
+const escape = shellQuote.quote;
 
 const execAsync = promisify(exec);
+
+// Always use Linux-compatible binary (installed via pip in Docker)
 const ytDlpPath = "yt-dlp";
 
 export async function POST(req: NextRequest) {
@@ -22,11 +26,6 @@ export async function POST(req: NextRequest) {
 
     const outputTemplate = path.join(tempDir, "output.%(ext)s");
 
-    const ytDlpPath =
-      process.platform === "win32"
-        ? path.resolve(process.cwd(), "yt-dlp.exe")
-        : "yt-dlp";
-
     let formatString = "";
     if (downloadMode === "audio") {
       formatString = audioFormatId;
@@ -36,17 +35,26 @@ export async function POST(req: NextRequest) {
       formatString = `${videoFormatId}+${audioFormatId}`;
     }
 
-    const cmd = `"${ytDlpPath}" --no-playlist -f "${formatString}" -o "${outputTemplate}" ${
+    // Secure inputs using shell-quote
+    const safeUrl = escape([url]);
+    const safeFormat = escape([formatString]);
+    const safeOutput = outputTemplate;
+
+    const cmd = `${ytDlpPath} --no-playlist -f ${safeFormat} -o "${safeOutput}" ${
       downloadMode !== "audio" ? "--merge-output-format mp4" : ""
-    } "${url}"`;
+    } ${safeUrl}`;
 
     console.log("Running yt-dlp command:", cmd);
     await execAsync(cmd);
 
+    // Read downloaded file
     const files = fs.readdirSync(tempDir);
+    if (files.length === 0) throw new Error("No output file found.");
+
     let filePath = path.join(tempDir, files[0]);
     let contentType = "video/mp4";
 
+    // Convert to mp3 if audio-only
     if (downloadMode === "audio") {
       const mp3Path = path.join(tempDir, "converted.mp3");
       await execAsync(`ffmpeg -y -i "${filePath}" -b:a 192k -vn "${mp3Path}"`);
@@ -60,7 +68,7 @@ export async function POST(req: NextRequest) {
     return new Response(buffer, {
       headers: {
         "Content-Type": contentType,
-        "Content-Disposition": `attachment; filename="video.${
+        "Content-Disposition": `attachment; filename="download.${
           downloadMode === "audio" ? "mp3" : "mp4"
         }"`,
         "Content-Length": stat.size.toString(),
@@ -70,6 +78,7 @@ export async function POST(req: NextRequest) {
     console.error("Download error:", err.message);
     return new Response("Failed to download", { status: 500 });
   } finally {
+    // Cleanup temp files after 15 seconds
     setTimeout(() => {
       try {
         const dirs = fs

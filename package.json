@@ -24,6 +24,7 @@
     "react-icons": "^5.5.0",
     "sanitize-filename": "^1.6.3",
     "shadcn": "^2.9.0",
+    "shell-quote": "^1.8.3",
     "sonner": "^2.0.6",
     "tailwind-merge": "^3.3.1",
     "tailwindcss-animate": "^1.0.7"
@@ -34,6 +35,7 @@
     "@types/node": "^20",
     "@types/react": "^19",
     "@types/react-dom": "^19",
+    "@types/shell-quote": "^1.7.5",
     "eslint": "^9",
     "eslint-config-next": "15.3.5",
     "tailwindcss": "^4",

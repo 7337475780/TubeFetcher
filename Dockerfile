@@ -1,32 +1,28 @@
-# Base image
-FROM node:18-slim
+# Base image with Node.js and Python (for yt-dlp)
+FROM node:20-slim
 
-# Install dependencies: ffmpeg, python3, pip
-RUN apt-get update && \
-    apt-get install -y --no-install-recommends \
-    ffmpeg \
-    python3 \
-    python3-pip && \
-    rm -rf /var/lib/apt/lists/*
-
-# Install yt-dlp with Debian override flag
-RUN pip3 install yt-dlp --break-system-packages
-
-# Create working directory
+# Set working directory
 WORKDIR /app
 
-# Copy package files and install deps first (for better caching)
+# Install dependencies (ffmpeg + Python + yt-dlp)
+RUN apt-get update && \
+    apt-get install -y ffmpeg python3 python3-pip curl && \
+    pip3 install yt-dlp && \
+    apt-get clean && \
+    rm -rf /var/lib/apt/lists/*
+
+# Copy package files and install Node.js dependencies
 COPY package*.json ./
 RUN npm install
 
-# Copy rest of the app
+# Copy the rest of the application
 COPY . .
 
-# Build app
+# Build the Next.js app
 RUN npm run build
 
-# Expose port
+# Expose the app port
 EXPOSE 3000
 
-# Start server
+# Start the Next.js server
 CMD ["npm", "start"]
