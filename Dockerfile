@@ -1,32 +1,36 @@
-# Use official Node.js base image
+# -------- Stage 1: Base with Python, ffmpeg, yt-dlp -------- #
+FROM python:3.11-slim AS yt-base
+
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends ffmpeg curl ca-certificates && \
+    pip install --no-cache-dir yt-dlp && \
+    apt-get clean && \
+    rm -rf /var/lib/apt/lists/*
+
+# -------- Stage 2: Final image with Node.js and yt-dlp -------- #
 FROM node:20-slim
 
-# Set working directory
+# Copy yt-dlp and ffmpeg from the previous stage
+COPY --from=yt-base /usr/local /usr/local
+COPY --from=yt-base /usr/lib /usr/lib
+COPY --from=yt-base /bin/ffmpeg /usr/bin/ffmpeg
+COPY --from=yt-base /usr/bin/yt-dlp /usr/bin/yt-dlp
+
 WORKDIR /app
 
-# Install dependencies: Python, ffmpeg, pip, curl
-RUN apt-get update && \
-    apt-get install -y --no-install-recommends \
-    ffmpeg \
-    python3 \
-    python3-pip \
-    curl \
-    ca-certificates \
-    gnupg \
-    && pip3 install --no-cache-dir yt-dlp \
-    && apt-get clean \
-    && rm -rf /var/lib/apt/lists/*
+# Install OS tools
+RUN apt-get update && apt-get install -y --no-install-recommends ffmpeg && rm -rf /var/lib/apt/lists/*
 
-# Copy only package.json and lockfile first (for caching)
+# Copy package files
 COPY package*.json ./
 
-# Install Node.js dependencies
+# Install Node dependencies
 RUN npm install
 
-# Copy full application
+# Copy app files
 COPY . .
 
-# Next.js standalone build
+# Build Next.js app
 RUN npm run build
 
 # Expose port
