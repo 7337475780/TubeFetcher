@@ -14,7 +14,9 @@ FROM node:20-slim
 COPY --from=yt-base /usr/local /usr/local
 COPY --from=yt-base /usr/lib /usr/lib
 COPY --from=yt-base /bin/ffmpeg /usr/bin/ffmpeg
-COPY --from=yt-base /usr/bin/yt-dlp /usr/bin/yt-dlp
+# Copy yt-dlp binary from yt-base
+COPY --from=yt-base /usr/local/bin/yt-dlp /usr/bin/yt-dlp
+
 
 WORKDIR /app
 
