@@ -14,9 +14,7 @@ FROM node:20-slim
 COPY --from=yt-base /usr/local /usr/local
 COPY --from=yt-base /usr/lib /usr/lib
 COPY --from=yt-base /bin/ffmpeg /usr/bin/ffmpeg
-# Copy yt-dlp binary from yt-base
 COPY --from=yt-base /usr/local/bin/yt-dlp /usr/bin/yt-dlp
-
 
 WORKDIR /app
 
@@ -25,8 +23,6 @@ RUN apt-get update && apt-get install -y --no-install-recommends ffmpeg && rm -r
 
 # Copy package files
 COPY package*.json ./
-
-# Install Node dependencies
 RUN npm install
 
 # Copy app files
@@ -35,8 +31,9 @@ COPY . .
 # Build Next.js app
 RUN npm run build
 
-# Expose port
-EXPOSE 3000
+# Set Railway port and expose it
+ENV PORT=8080
+EXPOSE 8080
 
-# Start app
-CMD ["npm", "start"]
+# Start app with standalone output
+CMD ["node", ".next/standalone/server.js"]
