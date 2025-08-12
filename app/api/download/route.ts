@@ -1,5 +1,4 @@
 import { spawn } from "child_process";
-import path from "path";
 import type { NextApiRequest, NextApiResponse } from "next";
 
 export default async function handler(
@@ -10,31 +9,42 @@ export default async function handler(
     return res.status(405).json({ error: "Method not allowed" });
   }
 
-  const { url, type } = req.query;
-  if (!url || !type) {
-    return res.status(400).json({ error: "Missing url or type" });
+  const { url, format } = req.query;
+  if (!url || !format) {
+    return res.status(400).json({ error: "Missing url or format" });
   }
 
   const ytDlpPath = "yt-dlp";
 
-  let format = "bestvideo+bestaudio/best";
-  if (type === "audio") format = "bestaudio";
-  else if (type === "video") format = "bestvideo";
+  // Set file extension based on requested format
+  const ext =
+    String(format).includes("audio") ||
+    String(format) === "mp3" ||
+    String(format) === "m4a"
+      ? String(format) === "mp3"
+        ? "mp3"
+        : "m4a"
+      : "mp4";
 
   res.setHeader(
     "Content-Disposition",
-    `attachment; filename="download.${type === "audio" ? "mp3" : "mp4"}"`
+    `attachment; filename="download.${ext}"`
   );
-  res.setHeader("Content-Type", type === "audio" ? "audio/mpeg" : "video/mp4");
 
+  // If audio, set audio MIME, otherwise video
+  res.setHeader(
+    "Content-Type",
+    ext === "mp3" || ext === "m4a" ? "audio/mpeg" : "video/mp4"
+  );
+
+  // Spawn yt-dlp with the provided format
   const ytdlp = spawn(ytDlpPath, [
     "-f",
-    format,
+    String(format), // User-specified format
     "--no-playlist",
-    "--quiet",
     "-o",
-    "-", // output to stdout
-    url as string,
+    "-", // Output to stdout
+    String(url),
   ]);
 
   ytdlp.stdout.pipe(res);
