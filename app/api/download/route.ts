@@ -27,29 +27,22 @@ export async function POST(req: NextRequest) {
     const outputTemplate = path.join(tempDir, "output.%(ext)s");
 
     let formatString = "";
-
     if (downloadMode === "audio") {
-      // audio only
       formatString = audioFormatId;
     } else if (downloadMode === "video") {
-      // if you want merged video+audio for video mode, do video+audio,
-      // otherwise just videoFormatId for pure video (no audio)
-      if (audioFormatId) {
-        formatString = `${videoFormatId}+${audioFormatId}`;
-      } else {
-        formatString = videoFormatId;
-      }
+      formatString = videoFormatId;
     } else {
-      // both mode: video+audio merged
       formatString = `${videoFormatId}+${audioFormatId}`;
     }
 
-    // Then use formatString in command:
-    const cmd = `${ytDlpPath} --no-playlist -f ${escape([
-      formatString,
-    ])} -o "${outputTemplate}" ${
+    // Secure inputs using shell-quote
+    const safeUrl = escape([url]);
+    const safeFormat = escape([formatString]);
+    const safeOutput = outputTemplate;
+
+    const cmd = `${ytDlpPath} --no-playlist -f ${safeFormat} -o "${safeOutput}" ${
       downloadMode !== "audio" ? "--merge-output-format mp4" : ""
-    } ${escape([url])}`;
+    } ${safeUrl}`;
 
     console.log("Running yt-dlp command:", cmd);
     await execAsync(cmd);
