@@ -1,189 +1,98 @@
-// pages/api/download.ts
-import type { NextApiRequest, NextApiResponse } from "next";
-import { spawn } from "child_process";
+import { NextRequest } from "next/server";
+import { exec } from "child_process";
+import fs from "fs";
+import path from "path";
+import os from "os";
 import { promisify } from "util";
-import stream from "stream";
-import { pipeline as pipelineCb } from "stream";
-const pipeline = promisify(pipelineCb);
+import shellQuote from "shell-quote";
+const escape = shellQuote.quote;
 
-type Body = {
-  url: string;
-  downloadMode: "audio" | "video" | "both";
-  videoFormatId?: string;
-  audioFormatId?: string;
-};
+const execAsync = promisify(exec);
 
-function safeFilename(name = "download") {
-  return String(name)
-    .replace(/[<>:"/\\|?*]+/g, "")
-    .slice(0, 120);
-}
+// Always use Linux-compatible binary (installed via pip in Docker)
+const ytDlpPath = "yt-dlp";
 
-function getYtDlpPath() {
-  return process.env.YTDLP_PATH || "yt-dlp";
-}
-function getFfmpegPath() {
-  return process.env.FFMPEG_PATH || "ffmpeg";
-}
-
-// Helper to get filename (title + ext) from yt-dlp for chosen format
-async function resolveFilename(url: string, format: string) {
-  return await new Promise<string>((resolve, reject) => {
-    const yt = spawn(getYtDlpPath(), [
-      "-f",
-      format,
-      "--no-playlist",
-      "--get-filename",
-      "-o",
-      "%(title)s.%(ext)s",
-      url,
-    ]);
-
-    let out = "";
-    let err = "";
-    yt.stdout.on("data", (b) => (out += b.toString()));
-    yt.stderr.on("data", (b) => (err += b.toString()));
-
-    yt.on("close", (code) => {
-      if (code === 0) {
-        resolve(out.trim().split("\n").pop() || "download");
-      } else {
-        // fallback to generic name but don't fail hard
-        console.warn("yt-dlp --get-filename failed:", err);
-        resolve("download");
-      }
-    });
-
-    yt.on("error", (e) => {
-      console.error("yt-dlp spawn error:", e);
-      resolve("download");
-    });
-  });
-}
-
-export default async function handler(
-  req: NextApiRequest,
-  res: NextApiResponse
-) {
-  if (req.method !== "POST") {
-    res.setHeader("Allow", "POST");
-    return res.status(405).json({ error: "Method Not Allowed" });
-  }
-
+export async function POST(req: NextRequest) {
   try {
-    const body = req.body as Body;
-    const { url, downloadMode, videoFormatId, audioFormatId } = body || {};
+    const { url, videoFormatId, audioFormatId, downloadMode } =
+      await req.json();
 
     if (!url || !downloadMode) {
-      return res.status(400).json({ error: "Missing required parameters" });
+      return new Response("Missing data", { status: 400 });
     }
 
-    // Build format string used by yt-dlp for streaming
+    const tempDir = path.join(os.tmpdir(), `yt-${Date.now()}`);
+    fs.mkdirSync(tempDir, { recursive: true });
+
+    const outputTemplate = path.join(tempDir, "output.%(ext)s");
+
     let formatString = "";
     if (downloadMode === "audio") {
-      formatString = audioFormatId || "bestaudio";
+      formatString = audioFormatId;
     } else if (downloadMode === "video") {
-      formatString = videoFormatId || "bestvideo";
+      formatString = videoFormatId;
     } else {
-      // both
-      if (videoFormatId && audioFormatId)
-        formatString = `${videoFormatId}+${audioFormatId}`;
-      else formatString = "bestvideo+bestaudio/best";
+      formatString = `${videoFormatId}+${audioFormatId}`;
     }
 
-    // Resolve filename for Content-Disposition (best-effort)
-    const filenameRaw = await resolveFilename(url, formatString);
-    const ext =
-      filenameRaw.split(".").pop() ||
-      (downloadMode === "audio" ? "mp3" : "mp4");
-    const filename = safeFilename(filenameRaw || `download.${ext}`);
+    // Secure inputs using shell-quote
+    const safeUrl = escape([url]);
+    const safeFormat = escape([formatString]);
+    const safeOutput = outputTemplate;
 
-    // Set headers early (will be used by browser)
-    res.setHeader("Content-Disposition", `attachment; filename="${filename}"`);
+    const cmd = `${ytDlpPath} --no-playlist -f ${safeFormat} -o "${safeOutput}" ${
+      downloadMode !== "audio" ? "--merge-output-format mp4" : ""
+    } ${safeUrl}`;
+
+    console.log("Running yt-dlp command:", cmd);
+    await execAsync(cmd);
+
+    // Read downloaded file
+    const files = fs.readdirSync(tempDir);
+    if (files.length === 0) throw new Error("No output file found.");
+
+    let filePath = path.join(tempDir, files[0]);
+    let contentType = "video/mp4";
+
+    // Convert to mp3 if audio-only
     if (downloadMode === "audio") {
-      res.setHeader("Content-Type", "audio/mpeg");
-    } else {
-      res.setHeader("Content-Type", "video/mp4");
+      const mp3Path = path.join(tempDir, "converted.mp3");
+      await execAsync(`ffmpeg -y -i "${filePath}" -b:a 192k -vn "${mp3Path}"`);
+      filePath = mp3Path;
+      contentType = "audio/mpeg";
     }
 
-    // Spawn yt-dlp to output to stdout
-    // Use '-o -' to stream to stdout
-    const ytdlpArgs = ["-f", formatString, "--no-playlist", "-o", "-", url];
-    const ytdlp = spawn(getYtDlpPath(), ytdlpArgs, {
-      stdio: ["ignore", "pipe", "pipe"],
+    const stat = fs.statSync(filePath);
+    const buffer = fs.readFileSync(filePath);
+
+    return new Response(buffer, {
+      headers: {
+        "Content-Type": contentType,
+        "Content-Disposition": `attachment; filename="download.${
+          downloadMode === "audio" ? "mp3" : "mp4"
+        }"`,
+        "Content-Length": stat.size.toString(),
+      },
     });
-
-    // Wire up stderr logging
-    ytdlp.stderr.on("data", (b) => {
-      console.error("yt-dlp:", b.toString());
-    });
-
-    // If audio-only: pipe yt-dlp stdout into ffmpeg to convert to mp3, then to res
-    if (downloadMode === "audio") {
-      const ffmpeg = spawn(
-        getFfmpegPath(),
-        [
-          "-hide_banner",
-          "-loglevel",
-          "error",
-          "-i",
-          "pipe:0",
-          "-f",
-          "mp3",
-          "-b:a",
-          "192k",
-          "pipe:1",
-        ],
-        { stdio: ["pipe", "pipe", "pipe"] }
-      );
-
-      // log ffmpeg stderr
-      ffmpeg.stderr.on("data", (b) => {
-        console.error("ffmpeg:", b.toString());
-      });
-
-      // Pipe yt-dlp -> ffmpeg -> res
-      ytdlp.stdout.pipe(ffmpeg.stdin);
-
-      // if client disconnects, kill children
-      const onClose = () => {
-        if (!ytdlp.killed) ytdlp.kill("SIGKILL");
-        if (!ffmpeg.killed) ffmpeg.kill("SIGKILL");
-      };
-      req.on("close", onClose);
-      req.on("aborted", onClose);
-
-      // stream ffmpeg stdout to response using pipeline for proper backpressure
-      await pipeline(ffmpeg.stdout, res);
-      // pipeline resolves when stream ends; then clean up
-      ffmpeg.stdin?.end();
-      if (!ytdlp.killed) ytdlp.kill();
-      if (!ffmpeg.killed) ffmpeg.kill();
-      return;
-    }
-
-    // For video or both: yt-dlp already outputs (merged) mp4/other container to stdout
-    const onClientClose = () => {
-      if (!ytdlp.killed) ytdlp.kill("SIGKILL");
-    };
-    req.on("close", onClientClose);
-    req.on("aborted", onClientClose);
-
-    // pipe yt-dlp stdout directly to response (streaming)
-    await pipeline(ytdlp.stdout, res);
-
-    // cleanup
-    if (!ytdlp.killed) ytdlp.kill();
-    return;
-  } catch (err) {
-    console.error("download API error:", err);
-    if (!res.headersSent) {
-      return res.status(500).json({ error: "Internal server error" });
-    } else {
-      // if headers already sent, just end
+  } catch (err: any) {
+    console.error("Download error:", err.message);
+    return new Response("Failed to download", { status: 500 });
+  } finally {
+    // Cleanup temp files after 15 seconds
+    setTimeout(() => {
       try {
-        res.end();
-      } catch {}
-    }
+        const dirs = fs
+          .readdirSync(os.tmpdir())
+          .filter((f) => f.startsWith("yt-"));
+        for (const dir of dirs) {
+          fs.rmSync(path.join(os.tmpdir(), dir), {
+            recursive: true,
+            force: true,
+          });
+        }
+      } catch (e) {
+        console.warn("Cleanup failed:", e);
+      }
+    }, 15000);
   }
 }
