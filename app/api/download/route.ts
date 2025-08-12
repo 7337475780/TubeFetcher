@@ -1,98 +1,56 @@
-import { NextRequest } from "next/server";
-import { exec } from "child_process";
-import fs from "fs";
+// pages/api/download.ts
+import { spawn } from "child_process";
 import path from "path";
-import os from "os";
-import { promisify } from "util";
-import shellQuote from "shell-quote";
-const escape = shellQuote.quote;
+import type { NextApiRequest, NextApiResponse } from "next";
 
-const execAsync = promisify(exec);
-
-// Always use Linux-compatible binary (installed via pip in Docker)
-const ytDlpPath = "yt-dlp";
-
-export async function POST(req: NextRequest) {
-  try {
-    const { url, videoFormatId, audioFormatId, downloadMode } =
-      await req.json();
-
-    if (!url || !downloadMode) {
-      return new Response("Missing data", { status: 400 });
-    }
-
-    const tempDir = path.join(os.tmpdir(), `yt-${Date.now()}`);
-    fs.mkdirSync(tempDir, { recursive: true });
-
-    const outputTemplate = path.join(tempDir, "output.%(ext)s");
-
-    let formatString = "";
-    if (downloadMode === "audio") {
-      formatString = audioFormatId;
-    } else if (downloadMode === "video") {
-      formatString = videoFormatId;
-    } else {
-      formatString = `${videoFormatId}+${audioFormatId}`;
-    }
-
-    // Secure inputs using shell-quote
-    const safeUrl = escape([url]);
-    const safeFormat = escape([formatString]);
-    const safeOutput = outputTemplate;
-
-    const cmd = `${ytDlpPath} --no-playlist -f ${safeFormat} -o "${safeOutput}" ${
-      downloadMode !== "audio" ? "--merge-output-format mp4" : ""
-    } ${safeUrl}`;
-
-    console.log("Running yt-dlp command:", cmd);
-    await execAsync(cmd);
-
-    // Read downloaded file
-    const files = fs.readdirSync(tempDir);
-    if (files.length === 0) throw new Error("No output file found.");
-
-    let filePath = path.join(tempDir, files[0]);
-    let contentType = "video/mp4";
-
-    // Convert to mp3 if audio-only
-    if (downloadMode === "audio") {
-      const mp3Path = path.join(tempDir, "converted.mp3");
-      await execAsync(`ffmpeg -y -i "${filePath}" -b:a 192k -vn "${mp3Path}"`);
-      filePath = mp3Path;
-      contentType = "audio/mpeg";
-    }
-
-    const stat = fs.statSync(filePath);
-    const buffer = fs.readFileSync(filePath);
-
-    return new Response(buffer, {
-      headers: {
-        "Content-Type": contentType,
-        "Content-Disposition": `attachment; filename="download.${
-          downloadMode === "audio" ? "mp3" : "mp4"
-        }"`,
-        "Content-Length": stat.size.toString(),
-      },
-    });
-  } catch (err: any) {
-    console.error("Download error:", err.message);
-    return new Response("Failed to download", { status: 500 });
-  } finally {
-    // Cleanup temp files after 15 seconds
-    setTimeout(() => {
-      try {
-        const dirs = fs
-          .readdirSync(os.tmpdir())
-          .filter((f) => f.startsWith("yt-"));
-        for (const dir of dirs) {
-          fs.rmSync(path.join(os.tmpdir(), dir), {
-            recursive: true,
-            force: true,
-          });
-        }
-      } catch (e) {
-        console.warn("Cleanup failed:", e);
-      }
-    }, 15000);
+export default async function handler(
+  req: NextApiRequest,
+  res: NextApiResponse
+) {
+  if (req.method !== "GET") {
+    return res.status(405).json({ error: "Method not allowed" });
   }
+
+  const { url, type } = req.query;
+  if (!url || !type) {
+    return res.status(400).json({ error: "Missing url or type" });
+  }
+
+  const ytDlpPath =
+    process.env.YTDLP_PATH || path.join(process.cwd(), "bin", "yt-dlp");
+
+  let format = "bestvideo+bestaudio/best";
+  if (type === "audio") format = "bestaudio";
+  else if (type === "video") format = "bestvideo";
+
+  res.setHeader(
+    "Content-Disposition",
+    `attachment; filename="download.${type === "audio" ? "mp3" : "mp4"}"`
+  );
+  res.setHeader("Content-Type", type === "audio" ? "audio/mpeg" : "video/mp4");
+
+  const ytdlp = spawn(ytDlpPath, [
+    "-f",
+    format,
+    "--no-playlist",
+    "--quiet",
+    "-o",
+    "-", // output to stdout
+    url as string,
+  ]);
+
+  ytdlp.stdout.pipe(res);
+
+  ytdlp.stderr.on("data", (data) => {
+    console.error(`yt-dlp error: ${data}`);
+  });
+
+  ytdlp.on("close", (code) => {
+    if (code !== 0) {
+      console.error(`yt-dlp process exited with code ${code}`);
+      if (!res.headersSent) {
+        res.status(500).end("Failed to download");
+      }
+    }
+  });
 }
