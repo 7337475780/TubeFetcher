@@ -1,75 +1,105 @@
 import { NextRequest } from "next/server";
 import { exec } from "child_process";
-import { promisify } from "util";
+import fs from "fs";
 import path from "path";
+import os from "os";
+import { promisify } from "util";
+import shellQuote from "shell-quote";
+const escape = shellQuote.quote;
 
 const execAsync = promisify(exec);
 
+// Always use Linux-compatible binary (installed via pip in Docker)
+const ytDlpPath = "yt-dlp";
+
 export async function POST(req: NextRequest) {
   try {
-    const { url, mode }: { url: string; mode?: "audio" | "video" | "both" } =
+    const { url, videoFormatId, audioFormatId, downloadMode } =
       await req.json();
 
-    if (!url) {
-      return new Response("Missing YouTube URL", { status: 400 });
+    if (!url || !downloadMode) {
+      return new Response("Missing data", { status: 400 });
     }
 
-    const ytDlpPath = "yt-dlp";
-    // const ytDlpPath =
-    //   process.platform === "win32"
-    //     ? path.resolve(process.cwd(), "yt-dlp.exe")
-    //     : "yt-dlp";
+    const tempDir = path.join(os.tmpdir(), `yt-${Date.now()}`);
+    fs.mkdirSync(tempDir, { recursive: true });
 
-    // Always get full info with all formats
-    const { stdout } = await execAsync(
-      `"${ytDlpPath}" -J --no-playlist "${url}"`,
-      { maxBuffer: 10 * 1024 * 1024 }
-    );
+    const outputTemplate = path.join(tempDir, "output.%(ext)s");
 
-    const info = JSON.parse(stdout);
-    const { title, thumbnail, duration, formats } = info;
+    let formatString = "";
 
-    // Filter formats client-side based on mode
-    let filteredFormats = formats.filter(
-      (f: any) => f.filesize || f.filesize_approx
-    );
-
-    if (mode === "audio") {
-      filteredFormats = filteredFormats.filter(
-        (f: any) => f.vcodec === "none" && f.acodec && f.acodec !== "none"
-      );
-    } else if (mode === "video") {
-      filteredFormats = filteredFormats.filter((f: any) => f.vcodec !== "none");
+    if (downloadMode === "audio") {
+      // audio only
+      formatString = audioFormatId;
+    } else if (downloadMode === "video") {
+      // if you want merged video+audio for video mode, do video+audio,
+      // otherwise just videoFormatId for pure video (no audio)
+      if (audioFormatId) {
+        formatString = `${videoFormatId}+${audioFormatId}`;
+      } else {
+        formatString = videoFormatId;
+      }
+    } else {
+      // both mode: video+audio merged
+      formatString = `${videoFormatId}+${audioFormatId}`;
     }
-    // else mode "both" or undefined = no filtering
 
-    const cleanedFormats = filteredFormats.map((f: any) => ({
-      format_id: f.format_id,
-      resolution:
-        f.vcodec === "none"
-          ? "audio only"
-          : f.format_note || f.resolution || `${f.height}p`,
-      ext: f.ext,
-      filesize: f.filesize || f.filesize_approx,
-      hasAudio: !!f.acodec && f.acodec !== "none",
-      vcodec: f.vcodec,
-      acodec: f.acodec,
-    }));
+    // Then use formatString in command:
+    const cmd = `${ytDlpPath} --no-playlist -f ${escape([
+      formatString,
+    ])} -o "${outputTemplate}" ${
+      downloadMode !== "audio" ? "--merge-output-format mp4" : ""
+    } ${escape([url])}`;
 
-    return Response.json({
-      title,
-      thumbnail,
-      duration,
-      formats: cleanedFormats,
+    console.log("Running yt-dlp command:", cmd);
+    await execAsync(cmd);
+
+    // Read downloaded file
+    const files = fs.readdirSync(tempDir);
+    if (files.length === 0) throw new Error("No output file found.");
+
+    let filePath = path.join(tempDir, files[0]);
+    let contentType = "video/mp4";
+
+    // Convert to mp3 if audio-only
+    if (downloadMode === "audio") {
+      const mp3Path = path.join(tempDir, "converted.mp3");
+      await execAsync(`ffmpeg -y -i "${filePath}" -b:a 192k -vn "${mp3Path}"`);
+      filePath = mp3Path;
+      contentType = "audio/mpeg";
+    }
+
+    const stat = fs.statSync(filePath);
+    const buffer = fs.readFileSync(filePath);
+
+    return new Response(buffer, {
+      headers: {
+        "Content-Type": contentType,
+        "Content-Disposition": `attachment; filename="download.${
+          downloadMode === "audio" ? "mp3" : "mp4"
+        }"`,
+        "Content-Length": stat.size.toString(),
+      },
     });
   } catch (err: any) {
-    console.error("Info fetch error:", err.stderr || err.message);
-    return new Response(
-      JSON.stringify({
-        error: "Failed to fetch video info",
-        details: err.message,
-      }),
-      { status: 500 }
-    );
+    console.error("Download error:", err.message);
+    return new Response("Failed to download", { status: 500 });
+  } finally {
+    // Cleanup temp files after 15 seconds
+    setTimeout(() => {
+      try {
+        const dirs = fs
+          .readdirSync(os.tmpdir())
+          .filter((f) => f.startsWith("yt-"));
+        for (const dir of dirs) {
+          fs.rmSync(path.join(os.tmpdir(), dir), {
+            recursive: true,
+            force: true,
+          });
+        }
+      } catch (e) {
+        console.warn("Cleanup failed:", e);
+      }
+    }, 15000);
   }
 }
