@@ -24,21 +24,50 @@ export async function POST(req: NextRequest) {
 
     // Keep only audio-only formats
     const audioFormats = formats
-      .filter((f: any) => f.vcodec === "none") // No video track
+      .filter((f: any) => f.vcodec === "none")
       .map((f: any) => ({
         format_id: f.format_id,
         resolution: "audio only",
         ext: f.ext,
         filesize: f.filesize || f.filesize_approx || null,
         acodec: f.acodec,
-        abr: f.abr || null, // audio bitrate
+        abr: f.abr || null,
+      }));
+
+    const videoFormats = formats
+      .filter(
+        (f: any) => f.vcodec !== "none" && (!f.acodec || f.acodec === "none")
+      )
+      .map((f: any) => ({
+        format_id: f.format_id,
+        resolution: f.format_note || f.resolution || `${f.height}p`,
+        ext: f.ext,
+        filesize: f.filesize || f.filesize_approx || null,
+        vcodec: f.vcodec,
+      }));
+
+    const bothFormats = formats
+      .filter(
+        (f: any) => f.vcodec !== "none" && f.acodec && f.acodec !== "none"
+      )
+      .map((f: any) => ({
+        format_id: f.format_id,
+        resolution: f.format_note || f.resolution || `${f.height}p`,
+        ext: f.ext,
+        filesize: f.filesize || f.filesize_approx || null,
+        vcodec: f.vcodec,
+        acodec: f.acodec,
       }));
 
     return Response.json({
       title,
       thumbnail,
       duration,
-      formats: audioFormats,
+      formats: {
+        audio: audioFormats,
+        video: videoFormats,
+        both: bothFormats,
+      },
     });
   } catch (err: any) {
     console.error("Info fetch error:", err.message);
