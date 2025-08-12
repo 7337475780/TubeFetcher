@@ -14,10 +14,11 @@ export async function POST(req: NextRequest) {
       return new Response("Missing YouTube URL", { status: 400 });
     }
 
-    const ytDlpPath =
-      process.platform === "win32"
-        ? path.resolve(process.cwd(), "yt-dlp.exe")
-        : "yt-dlp";
+    const ytDlpPath = "yt-dlp";
+    // const ytDlpPath =
+    //   process.platform === "win32"
+    //     ? path.resolve(process.cwd(), "yt-dlp.exe")
+    //     : "yt-dlp";
 
     // Always get full info with all formats
     const { stdout } = await execAsync(
