@@ -1,4 +1,3 @@
-// pages/api/download.ts
 import { spawn } from "child_process";
 import path from "path";
 import type { NextApiRequest, NextApiResponse } from "next";
@@ -16,8 +15,7 @@ export default async function handler(
     return res.status(400).json({ error: "Missing url or type" });
   }
 
-  const ytDlpPath =
-    process.env.YTDLP_PATH || path.join(process.cwd(), "bin", "yt-dlp");
+  const ytDlpPath = "yt-dlp";
 
   let format = "bestvideo+bestaudio/best";
   if (type === "audio") format = "bestaudio";
