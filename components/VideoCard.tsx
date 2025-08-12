@@ -61,6 +61,8 @@ const VideoCard = ({
   const sortByQuality = (a: Format, b: Format) =>
     (parseInt(b.resolution || "0") || 0) - (parseInt(a.resolution || "0") || 0);
 
+  console.log("Formats in VideoCard:", formats);
+
   const audioFormats = formats
     .filter((f) => f.vcodec === "none")
     .sort((a, b) => (b.filesize || 0) - (a.filesize || 0));
@@ -81,6 +83,10 @@ const VideoCard = ({
         parseInt(f.resolution?.replace("p", "") || "0") >= 720
     )
     .sort(sortByQuality);
+
+  console.log("audioFormats:", audioFormats);
+  console.log("videoFormats:", videoFormats);
+  console.log("bothFormats:", bothFormats);
 
   const selectedVideo = formats.find(
     (f) => f.format_id === selectedVideoFormat
