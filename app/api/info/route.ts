@@ -1,7 +1,6 @@
 import { NextRequest } from "next/server";
 import { exec } from "child_process";
 import { promisify } from "util";
-import path from "path";
 
 const execAsync = promisify(exec);
 
@@ -10,23 +9,21 @@ export async function POST(req: NextRequest) {
     const { url } = await req.json();
 
     if (!url) {
-      return new Response("Missing YouTube URL", { status: 400 });
+      return new Response("Missing video URL", { status: 400 });
     }
 
-    // const ytDlpPath =
-    //   process.platform === "win32"
-    //     ? path.resolve(process.cwd(), "yt-dlp.exe")
-    //     : "yt-dlp";
-
+    // Always just "yt-dlp" in server (Docker/Unix) environment
     const ytDlpPath = "yt-dlp";
+
+    // Fetch info in JSON format
     const { stdout } = await execAsync(
-      `"${ytDlpPath}" -J --no-playlist "${url}"`
+      `${ytDlpPath} -J --no-playlist "${url}"`
     );
 
     const info = JSON.parse(stdout);
     const { title, thumbnail, duration, formats } = info;
 
-    // Filter + map formats
+    // Clean formats for frontend
     const cleanedFormats = formats
       .filter((f: any) => f.filesize || f.filesize_approx)
       .map((f: any) => ({
