@@ -1,6 +1,5 @@
 import { NextRequest } from "next/server";
 import { spawn } from "child_process";
-import { Readable } from "stream";
 
 type DownloadMode = "audio" | "video" | "both";
 
@@ -34,19 +33,22 @@ export async function POST(req: NextRequest) {
 
     args.push(url);
 
-    // Spawn yt-dlp
     const ytProcess = spawn("yt-dlp", args);
 
     // Convert Node Readable to Web ReadableStream
     const stream = new ReadableStream({
       start(controller) {
-        ytProcess.stdout.on("data", (chunk) => {
-          controller.enqueue(chunk);
-        });
+        ytProcess.stdout.on("data", (chunk) => controller.enqueue(chunk));
+
         ytProcess.stdout.on("end", () => controller.close());
+
+        // Only log real errors, ignore progress logs
         ytProcess.stderr.on("data", (chunk) => {
-          console.error("yt-dlp error:", chunk.toString());
+          const text = chunk.toString();
+          if (!text.startsWith("[download]"))
+            console.error("yt-dlp error:", text);
         });
+
         ytProcess.on("error", (err) => controller.error(err));
       },
     });
