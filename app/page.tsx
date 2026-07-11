@@ -59,7 +59,7 @@ const Page = () => {
     if (saved) {
       try {
         setHistory(JSON.parse(saved));
-      } catch (e) {
+      } catch {
         console.error("Failed to parse history");
       }
     }
@@ -138,11 +138,14 @@ const Page = () => {
         method: "POST",
         body: JSON.stringify({ url: url.trim() }),
       });
-      if (!res.ok) throw new Error("Failed to fetch video info");
+      if (!res.ok) {
+        throw new Error(await res.text() || "Failed to fetch video info");
+      }
       const data: VideoInfo = await res.json();
       setVideo(data);
-    } catch {
-      toast.error("Failed to fetch video info");
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : "Failed to fetch video info";
+      toast.error(message);
     } finally {
       setFetching(false);
     }
@@ -176,7 +179,7 @@ const Page = () => {
 
       const contentLength = res.headers.get("Content-Length");
       const total = contentLength ? parseInt(contentLength, 10) : 0;
-      let startTime = Date.now();
+      const startTime = Date.now();
       let lastReportTime = startTime;
       let bytesSinceLastReport = 0;
 

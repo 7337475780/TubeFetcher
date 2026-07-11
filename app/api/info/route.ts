@@ -1,37 +1,15 @@
-import { NextRequest } from "next/server";
-import { execFile } from "child_process";
-import { promisify } from "util";
-import path from "path";
-import { RuntimeDetector } from "../../../lib/downloader/RuntimeDetector";
-import { CookieManager } from "../../../lib/downloader/CookieManager";
-
-const execFileAsync = promisify(execFile);
+import { NextRequest, NextResponse } from "next/server";
+import { DownloaderService } from "../../../lib/downloader/DownloaderService";
+import { DownloaderError } from "../../../lib/downloader/DownloaderError";
 
 export async function POST(req: NextRequest) {
   try {
     const { url } = await req.json();
-
     if (!url) {
       return new Response("Missing video URL", { status: 400 });
     }
 
-    const ytDlpPath = process.platform === "win32"
-      ? path.join(process.cwd(), "yt-dlp.exe")
-      : "/usr/local/bin/yt-dlp";
-
-    // Fetch info in JSON format using shell-safe execFile
-    const args = [
-      "-J",
-      "--no-playlist",
-      "--no-check-certificates",
-      ...RuntimeDetector.getRuntimeArgs(),
-      ...CookieManager.getCookieArgs(),
-      url,
-    ];
-
-    const { stdout } = await execFileAsync(ytDlpPath, args);
-
-    const info = JSON.parse(stdout);
+    const info = await DownloaderService.getInfo(url);
     const { title, thumbnail, duration, formats } = info;
 
     // Clean formats for frontend
@@ -53,15 +31,17 @@ export async function POST(req: NextRequest) {
         fps: f.fps,
       }));
 
-    return Response.json({
+    return NextResponse.json({
       title,
       thumbnail,
       duration,
       formats: cleanedFormats,
     });
-  } catch (err) {
-    const error = err as Error;
-    console.error("Info fetch error:", error.message);
-    return new Response("Failed to fetch video info", { status: 500 });
+  } catch (err: unknown) {
+    if (err instanceof DownloaderError) {
+      return new Response(err.message, { status: 400 });
+    }
+    const message = err instanceof Error ? err.message : "Failed to fetch video info";
+    return new Response(message, { status: 500 });
   }
 }

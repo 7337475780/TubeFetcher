@@ -1,71 +1,37 @@
-import { execSync } from "child_process";
+import child_process from "child_process";
 import fs from "fs";
 
-/**
- * yt-dlp --js-runtimes expects the format: "runtimeName:path"
- * e.g. "node:C:\Program Files\nodejs\node.exe"
- * See: https://github.com/yt-dlp/yt-dlp/wiki/EJS
- */
 export class RuntimeDetector {
   /**
    * Detects the best available JS runtime and returns the yt-dlp formatted string.
-   * Returns null if no runtime is found.
+   * Verifies the runtime works by running it with '--version'.
+   * Returns null if no verified runtime is found.
    */
   static getFormattedRuntime(): string | null {
-    const isWin = process.platform === "win32";
-    const whichCmd = isWin ? "where" : "which";
-
-    // 1. Highest priority: the currently executing Node process itself
-    //    On Render/Railway/Docker, process.execPath is the exact path to node inside the container.
-    if (
-      process.execPath &&
-      (process.execPath.toLowerCase().endsWith("node") ||
-        process.execPath.toLowerCase().endsWith("node.exe"))
-    ) {
-      if (fs.existsSync(process.execPath)) {
-        console.log(`[RuntimeDetector] Using current Node process: ${process.execPath}`);
-        return `node:${process.execPath}`;
-      }
+    // 1. Try Node.js
+    const nodePath = this.findAndVerifyRuntime("node", ["--version"]);
+    if (nodePath) {
+      return `node:${nodePath}`;
     }
 
-    // 2. Try to find Node in PATH
-    try {
-      const output = execSync(`${whichCmd} node`, {
-        stdio: ["ignore", "pipe", "ignore"],
-      })
-        .toString()
-        .trim();
-      const firstNode = output.split("\n")[0].trim();
-      if (firstNode && fs.existsSync(firstNode)) {
-        console.log(`[RuntimeDetector] Found Node in PATH: ${firstNode}`);
-        return `node:${firstNode}`;
-      }
-    } catch (e) {
-      // Node not in PATH
+    // 2. Try Deno
+    const denoPath = this.findAndVerifyRuntime("deno", ["--version"]);
+    if (denoPath) {
+      return `deno:${denoPath}`;
     }
 
-    // 3. Try Deno (yt-dlp's default runtime)
-    try {
-      const output = execSync(`${whichCmd} deno`, {
-        stdio: ["ignore", "pipe", "ignore"],
-      })
-        .toString()
-        .trim();
-      const firstDeno = output.split("\n")[0].trim();
-      if (firstDeno && fs.existsSync(firstDeno)) {
-        console.log(`[RuntimeDetector] Found Deno in PATH: ${firstDeno}`);
-        return `deno:${firstDeno}`;
-      }
-    } catch (e) {
-      // Deno not found
+    // 3. Try Bun
+    const bunPath = this.findAndVerifyRuntime("bun", ["--version"]);
+    if (bunPath) {
+      return `bun:${bunPath}`;
     }
 
-    console.warn("[RuntimeDetector] No supported JS runtime found. YouTube may fail with bot challenges.");
     return null;
   }
 
   /**
-   * Returns the correct --js-runtimes argument array for yt-dlp, or empty array if no runtime found.
+   * Returns the correct --js-runtimes argument array for yt-dlp.
+   * Returns an empty array if no runtime is available.
    */
   static getRuntimeArgs(): string[] {
     const runtime = this.getFormattedRuntime();
@@ -73,5 +39,64 @@ export class RuntimeDetector {
       return ["--js-runtimes", runtime];
     }
     return [];
+  }
+
+  /**
+   * Finds the path of a runtime and verifies it by executing a check command.
+   */
+  private static findAndVerifyRuntime(name: string, args: string[]): string | null {
+    // For Node, check process.execPath first
+    if (name === "node" && process.execPath) {
+      const cleanPath = process.execPath;
+      if (
+        (cleanPath.toLowerCase().endsWith("node") || cleanPath.toLowerCase().endsWith("node.exe")) &&
+        fs.existsSync(cleanPath)
+      ) {
+        if (this.verifyExecution(cleanPath, args)) {
+          return cleanPath;
+        }
+      }
+    }
+
+    // Check system PATH
+    const isWin = process.platform === "win32";
+    const whichCmd = isWin ? "where" : "which";
+
+    try {
+      const output = child_process.execSync(`${whichCmd} ${name}`, {
+        stdio: ["ignore", "pipe", "ignore"],
+      })
+        .toString()
+        .trim();
+      
+      const paths = output.split("\n").map((p) => p.trim());
+      for (const p of paths) {
+        if (p && fs.existsSync(p)) {
+          if (this.verifyExecution(p, args)) {
+            return p;
+          }
+        }
+      }
+    } catch {
+      // Ignore errors when which/where command fails
+    }
+
+    return null;
+  }
+
+  /**
+   * Executes the binary at filePath with the specified arguments.
+   * Returns true only if it runs successfully (exit code 0).
+   */
+  private static verifyExecution(filePath: string, args: string[]): boolean {
+    try {
+      child_process.execSync(`"${filePath}" ${args.join(" ")}`, {
+        stdio: "ignore",
+        timeout: 2000, // Safe timeout so it doesn't hang
+      });
+      return true;
+    } catch {
+      return false;
+    }
   }
 }
