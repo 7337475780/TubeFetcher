@@ -2,7 +2,8 @@
 
 import React, { useRef } from "react";
 import { toast } from "sonner";
-import { XIcon } from "lucide-react";
+import { XIcon, Link as LinkIcon, ArrowRight } from "lucide-react";
+import { motion } from "framer-motion";
 
 type Props = {
   placeholder?: string;
@@ -18,11 +19,11 @@ const Input = ({
   value,
   onChange,
   onButtonClick,
-  buttonLabel = "Submit",
+  buttonLabel = "Fetch",
   disabled = false,
 }: Props) => {
   const inputRef = useRef<HTMLInputElement>(null);
-  const hasAutoPasted = useRef(false); // ✅ ensures auto-paste happens only once
+  const hasAutoPasted = useRef(false);
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
     if (e.key === "Enter" && onButtonClick && !disabled) {
@@ -38,55 +39,67 @@ const Input = ({
     try {
       const text = await navigator.clipboard.readText();
       if (text && text.includes("youtu")) {
-        onChange({
-          target: { value: text },
-        } as React.ChangeEvent<HTMLInputElement>);
-        toast("Pasted YouTube URL from clipboard");
+        onChange({ target: { value: text } } as React.ChangeEvent<HTMLInputElement>);
+        toast.success("URL pasted from clipboard");
       }
     } catch {
       // Clipboard access denied
     }
   };
 
-  const handleClear = () => {
-    onChange({ target: { value: "" } } as React.ChangeEvent<HTMLInputElement>);
-    inputRef.current?.focus();
-  };
-
   return (
-    <div className="relative w-full flex flex-col sm:flex-row gap-3 items-stretch">
-      <div className="relative flex-1">
+    <div className="relative w-full group/input">
+      <div className="absolute -inset-[1px] rounded-2xl opacity-0 group-hover/input:opacity-100 transition duration-500 overflow-hidden pointer-events-none">
+        <div className="absolute inset-[-1000%] animate-[spin_2s_linear_infinite] bg-[conic-gradient(from_90deg_at_50%_50%,#e2cbff_0%,#4f46e5_50%,#e2cbff_100%)]"></div>
+      </div>
+      
+      <div className="relative w-full flex items-center bg-white dark:bg-[#030303] backdrop-blur-xl rounded-2xl p-2 transition-all shadow-xl dark:shadow-2xl z-10 border border-gray-200 dark:border-white/10 group-hover/input:border-transparent dark:group-hover/input:border-transparent">
+        
+        <div className="pl-4 pr-2 text-gray-400 dark:text-gray-500">
+          <LinkIcon size={20} />
+        </div>
+
         <input
           ref={inputRef}
           type="text"
+          className="w-full bg-transparent border-none outline-none text-gray-900 dark:text-white placeholder-gray-400 dark:placeholder-gray-500 text-lg py-3 px-2 disabled:opacity-50"
+          placeholder={placeholder}
           value={value}
           onChange={onChange}
-          onFocus={handleAutoPaste} // ✅ onFocus triggers one-time paste
           onKeyDown={handleKeyDown}
-          placeholder={placeholder}
+          onFocus={handleAutoPaste}
           disabled={disabled}
-          aria-label="YouTube video URL"
-          className="w-full rounded-full border border-gray-300 bg-white/70 dark:bg-white/10 px-4 py-2 text-sm shadow-sm focus:ring-2 focus:ring-blue-500 focus:outline-none transition-all duration-150 disabled:opacity-50 pr-10"
+          autoComplete="off"
+          spellCheck="false"
         />
-        {value && !disabled && (
+
+        {value && (
           <button
-            onClick={handleClear}
-            className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-blue-500 transition"
-            type="button"
-            aria-label="Clear input"
+            onClick={() => {
+              onChange({ target: { value: "" } } as React.ChangeEvent<HTMLInputElement>);
+              inputRef.current?.focus();
+            }}
+            className="p-2 text-gray-400 hover:text-gray-700 dark:hover:text-white transition-colors rounded-full hover:bg-gray-100 dark:hover:bg-white/10 mx-2"
+            disabled={disabled}
+            title="Clear"
           >
-            <XIcon size={16} />
+            <XIcon size={18} />
           </button>
         )}
-      </div>
 
-      <button
-        onClick={onButtonClick}
-        disabled={disabled}
-        className="rounded-full cursor-pointer px-6 py-2 text-sm font-semibold text-white bg-gradient-to-r from-blue-600 to-purple-600 hover:brightness-110 transition disabled:opacity-50"
-      >
-        {buttonLabel}
-      </button>
+        {onButtonClick && (
+          <motion.button
+            whileHover={{ scale: 1.02 }}
+            whileTap={{ scale: 0.98 }}
+            onClick={onButtonClick}
+            disabled={disabled || !value}
+            className="ml-2 flex items-center gap-2 px-6 py-3 rounded-xl font-semibold text-white bg-indigo-600 hover:bg-indigo-700 dark:bg-white/10 dark:hover:bg-white/20 disabled:opacity-50 transition-all border border-transparent dark:border-white/5"
+          >
+            {buttonLabel}
+            <ArrowRight size={18} className="opacity-70" />
+          </motion.button>
+        )}
+      </div>
     </div>
   );
 };

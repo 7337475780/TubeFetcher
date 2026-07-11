@@ -1,37 +1,43 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# TubeFetcher
 
-## Getting Started
+TubeFetcher is a fast, clean, and modern YouTube video and audio downloader built with Next.js, Tailwind CSS, and yt-dlp. 
 
-First, run the development server:
+It supports high-quality downloads (1080p, 4K) by automatically merging video and audio streams using fmpeg under the hood. The UI is heavily inspired by modern design trends, featuring glassmorphism, bento grids, and interactive aurora backgrounds.
 
-```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
-```
+## Features
+- **4K Video Downloads:** Automatically merges high-res video and audio using fmpeg.
+- **Audio Extraction:** Quickly extract MP3s from any YouTube link.
+- **Modern UI:** Built with Framer Motion, Tailwind CSS, and next-themes for a slick dark/light mode experience.
+- **Universal Support:** While optimized for YouTube, the core yt-dlp engine actually supports downloading from over 1,000+ sites (including Twitter, Instagram, and TikTok).
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+## Setup (Local Development)
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+### Prerequisites
+You need two things installed on your machine for this to work locally:
+1. **[ffmpeg](https://ffmpeg.org/download.html)**: Used to merge separate video and audio streams. Make sure it's added to your system PATH.
+2. **[yt-dlp](https://github.com/yt-dlp/yt-dlp)**: Place the yt-dlp.exe (on Windows) or the yt-dlp binary (on Mac/Linux) directly in the root folder of this project.
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+### Running the app
+1. Run 
+pm install to install dependencies.
+2. Start the dev server with 
+pm run dev.
+3. Open http://localhost:3000 in your browser.
 
-## Learn More
+## Deployment
 
-To learn more about Next.js, take a look at the following resources:
+Because this app relies on heavy binary dependencies (yt-dlp and fmpeg) and downloads large temporary files before serving them to the user, **you cannot deploy this to a free serverless tier (like Vercel Hobby)**. Serverless functions will time out and run out of temporary disk space for any video longer than a few minutes.
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+**The best way to deploy this is on a standard server (like a DigitalOcean Droplet, Hetzner, or AWS EC2).**
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+We've included a ready-to-go Dockerfile to make deployment stupidly easy. It handles installing Node, ffmpeg, and yt-dlp for you:
 
-## Deploy on Vercel
+`ash
+# Build the container
+docker build -t tubefetcher .
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+# Run the container
+docker run -p 3000:3000 tubefetcher
+`
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
-"# tubefetcher_backend" 
+That's it! If you have Docker installed on a basic /month Linux server, running those two commands will get your app live and completely immune to those annoying serverless timeouts.

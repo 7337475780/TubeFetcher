@@ -7,26 +7,25 @@ import ThemeToggle from "./ThemeToggle";
 
 const Navbar = () => {
   return (
-    <nav className="w-full border-b border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900 shadow-sm">
-      <div className="h-10 max-w-5xl mx-auto flex items-center justify-between px-4 sm:px-6">
-        <Link href="/" className="flex items-center gap-2">
+    <nav className="sticky top-0 w-full h-16 border-b border-gray-200/50 dark:border-white/5 bg-white/70 dark:bg-[#030303]/70 backdrop-blur-xl shadow-sm z-50 transition-colors duration-500">
+      <div className="h-full max-w-7xl mx-auto flex items-center justify-between px-6 lg:px-8">
+        <Link href="/" className="flex items-center gap-3 group">
           <Image
             src="/images/logo.png"
             alt="TubeFetcher Logo"
-            width={24}
-            height={24}
+            width={32}
+            height={32}
             priority
-            className="rounded-sm"
+            className="rounded-xl transform group-hover:scale-110 group-hover:rotate-3 transition-all duration-300 shadow-sm group-hover:shadow-indigo-500/20"
           />
-          <h1 className="text-lg font-semibold tracking-wide text-red-600 dark:text-red-500">
-            Tube<span className="text-black dark:text-white">Fetcher</span>
+          <h1 className="text-2xl font-black tracking-tighter text-gray-900 dark:text-white">
+            Tube<span className="text-transparent bg-clip-text bg-gradient-to-r from-indigo-500 to-pink-500">Fetcher</span>
           </h1>
         </Link>
 
-        {/* Optional right-side links or actions */}
-        {/* <div className="text-sm text-gray-600 dark:text-gray-300">Beta</div> */}
-
-        <ThemeToggle />
+        <div className="flex items-center gap-4">
+          <ThemeToggle />
+        </div>
       </div>
     </nav>
   );
