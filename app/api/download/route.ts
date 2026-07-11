@@ -1,6 +1,8 @@
 import { NextRequest } from "next/server";
 import { spawn } from "child_process";
 import path from "path";
+import { RuntimeDetector } from "../../../lib/downloader/RuntimeDetector";
+import { CookieManager } from "../../../lib/downloader/CookieManager";
 
 export async function POST(req: NextRequest) {
   try {
@@ -10,7 +12,8 @@ export async function POST(req: NextRequest) {
     if (!url) return new Response("Missing URL", { status: 400 });
 
     const args: string[] = [
-      "--js-runtimes=node",
+      ...RuntimeDetector.getRuntimeArgs(),
+      ...CookieManager.getCookieArgs(),
       "--no-check-certificates",
       "-f"
     ];

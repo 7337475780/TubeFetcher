@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { execSync } from "child_process";
 import { RuntimeDetector } from "../../../lib/downloader/RuntimeDetector";
+import { CookieManager } from "../../../lib/downloader/CookieManager";
 import path from "path";
 
 export async function GET() {
@@ -30,7 +31,7 @@ export async function GET() {
   }
 
   // 4. Check cookies
-  results["cookies"] = "Not configured"; // CookieManager removed
+  results["cookies"] = CookieManager.getDiagnostics();
 
   // 5. Node.js version
   results["node"] = `✓ ${process.version}`;

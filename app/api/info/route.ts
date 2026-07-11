@@ -1,9 +1,11 @@
 import { NextRequest } from "next/server";
-import { exec } from "child_process";
+import { execFile } from "child_process";
 import { promisify } from "util";
 import path from "path";
+import { RuntimeDetector } from "../../../lib/downloader/RuntimeDetector";
+import { CookieManager } from "../../../lib/downloader/CookieManager";
 
-const execAsync = promisify(exec);
+const execFileAsync = promisify(execFile);
 
 export async function POST(req: NextRequest) {
   try {
@@ -17,10 +19,17 @@ export async function POST(req: NextRequest) {
       ? path.join(process.cwd(), "yt-dlp.exe")
       : "/usr/local/bin/yt-dlp";
 
-    // Fetch info in JSON format
-    const { stdout } = await execAsync(
-      `"${ytDlpPath}" -J --no-playlist --no-check-certificates --js-runtimes node "${url}"`
-    );
+    // Fetch info in JSON format using shell-safe execFile
+    const args = [
+      "-J",
+      "--no-playlist",
+      "--no-check-certificates",
+      ...RuntimeDetector.getRuntimeArgs(),
+      ...CookieManager.getCookieArgs(),
+      url,
+    ];
+
+    const { stdout } = await execFileAsync(ytDlpPath, args);
 
     const info = JSON.parse(stdout);
     const { title, thumbnail, duration, formats } = info;
