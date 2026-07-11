@@ -10,7 +10,7 @@ export async function POST(req: NextRequest) {
     if (!url) return new Response("Missing URL", { status: 400 });
 
     const args: string[] = [
-      "--js-runtimes=node", 
+      "--js-runtimes=node",
       "--no-check-certificates",
       "-f"
     ];
@@ -27,7 +27,7 @@ export async function POST(req: NextRequest) {
       const baseName = `yt_dlp_${Date.now()}`;
       tempPath = path.join(os.tmpdir(), `${baseName}.mp3`); // Final converted file
       const templatePath = path.join(os.tmpdir(), `${baseName}.%(ext)s`); // yt-dlp downloads to this, then converts
-      
+
       args.push(formatId, "-x", "--audio-format", "mp3", "-o", templatePath, "--no-playlist");
     } else if (downloadMode === "video") {
       if (!formatId)
@@ -73,7 +73,7 @@ export async function POST(req: NextRequest) {
             !text.startsWith("frame=") &&
             !text.startsWith("size=")
           ) {
-             if (text.length > 0) console.error("yt-dlp log:", text);
+            if (text.length > 0) console.error("yt-dlp log:", text);
           }
         });
         ytProcess.on("close", (code) => {
@@ -85,7 +85,7 @@ export async function POST(req: NextRequest) {
 
       const fs = await import("fs");
       const stat = fs.statSync(tempPath);
-      
+
       const stream = new ReadableStream({
         start(controller) {
           const fileStream = fs.createReadStream(tempPath);
@@ -119,7 +119,7 @@ export async function POST(req: NextRequest) {
     const stream = new ReadableStream({
       start(controller) {
         let isClosed = false;
-        
+
         req.signal.addEventListener("abort", () => {
           ytProcess.kill();
         });
@@ -148,7 +148,7 @@ export async function POST(req: NextRequest) {
             !text.startsWith("Stream #") &&
             !text.includes("kb/s")
           ) {
-             if (text.length > 0) console.error("yt-dlp log:", text);
+            if (text.length > 0) console.error("yt-dlp log:", text);
           }
         });
 
