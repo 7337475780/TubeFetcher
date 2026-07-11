@@ -48,7 +48,7 @@ export async function POST(req: NextRequest) {
 
     const ytDlpPath = process.platform === "win32"
       ? path.join(process.cwd(), "yt-dlp.exe")
-      : "yt-dlp";
+      : "/usr/local/bin/yt-dlp";
 
     const filename = downloadMode === "audio" ? "audio.mp3" : downloadMode === "both" ? "video.mkv" : "video.mp4";
 

@@ -15,7 +15,7 @@ export async function POST(req: NextRequest) {
 
     const ytDlpPath = process.platform === "win32"
       ? path.join(process.cwd(), "yt-dlp.exe")
-      : "yt-dlp";
+      : "/usr/local/bin/yt-dlp";
 
     // Fetch info in JSON format
     const { stdout } = await execAsync(
