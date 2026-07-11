@@ -57,4 +57,14 @@ describe("CookieManager", () => {
     const args = CookieManager.getCookieArgs();
     expect(args).toEqual([]);
   });
+
+  it("should validate and load cookies from YOUTUBE_COOKIES environment variable, resolving literal escapes", () => {
+    process.env.YOUTUBE_COOKIES = "# Netscape HTTP Cookie File\\n.youtube.com\\tTRUE\\t/\\tTRUE\\t1712345678\\tGPS\\t1";
+    vi.spyOn(fs, "writeFileSync").mockImplementation(() => {});
+    vi.spyOn(fs, "existsSync").mockReturnValue(true);
+
+    const args = CookieManager.getCookieArgs();
+    expect(args).toContain("--cookies");
+    expect(args[1]).toContain("youtube_cookies_temp.txt");
+  });
 });

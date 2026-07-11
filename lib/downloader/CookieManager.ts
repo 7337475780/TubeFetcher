@@ -109,10 +109,20 @@ export class CookieManager {
         }
 
         let cookieContent = process.env.YOUTUBE_COOKIES.trim();
+        
+        // Unescape literal control characters (e.g. \n, \r, \t) from cloud provider environments
+        cookieContent = cookieContent
+          .replace(/\\n/g, "\n")
+          .replace(/\\r/g, "\r")
+          .replace(/\\t/g, "\t");
+
         // If it looks like base64, decode it
-        if (/^[a-zA-Z0-9+/={}\s]+$/.test(cookieContent) && !cookieContent.includes("\t")) {
+        if (/^[a-zA-Z0-9+/={}\s]+$/.test(cookieContent) && !cookieContent.includes("\t") && !cookieContent.includes("\n")) {
           try {
-            cookieContent = Buffer.from(cookieContent, "base64").toString("utf-8");
+            const decoded = Buffer.from(cookieContent, "base64").toString("utf-8");
+            if (this.isValidNetscapeCookies(decoded)) {
+              cookieContent = decoded;
+            }
           } catch {
             // Ignore, use raw
           }
