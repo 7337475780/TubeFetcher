@@ -16,7 +16,7 @@ const Navbar = () => {
             width={32}
             height={32}
             priority
-            className="rounded-xl transform group-hover:scale-110 group-hover:rotate-3 transition-all duration-300 shadow-sm group-hover:shadow-indigo-500/20"
+            className="rounded-xl transform  transition-all duration-300 group-hover:shadow-indigo-500/20"
           />
           <h1 className="text-2xl font-black tracking-tighter text-gray-900 dark:text-white">
             Tube<span className="text-transparent bg-clip-text bg-gradient-to-r from-indigo-500 to-pink-500">Fetcher</span>
