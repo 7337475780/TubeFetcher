@@ -17,7 +17,7 @@ export const metadata: Metadata = {
   description: "Free YouTube video downloader...",
   icons: {
     icon: "/icons/logo.svg",
-    shortcut: "/favicon.ico",
+    shortcut: "/logo.svg",
     apple: "/icons/logo.svg",
   },
 };

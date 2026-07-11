@@ -9,7 +9,9 @@ import { UrlNormalizer } from "./UrlNormalizer";
 import { RetryManager } from "./RetryManager";
 import { DownloaderError, parseYtDlpError } from "./DownloaderError";
 import { Logger } from "./Logger";
-
+import { MetadataCache } from "./MetadataCache";
+import { DownloadQueue } from "./DownloadQueue";
+import { RequestManager } from "./RequestManager";
 const execFileAsync = promisify(execFile);
 
 export interface DownloadResult {
@@ -103,29 +105,38 @@ export class DownloaderService {
     const normalizedUrl = UrlNormalizer.normalize(url);
     const ytDlpPath = this.getYtDlpPath();
 
-    return RetryManager.retry(async () => {
-      const args = [
-        "-J",
-        "--no-playlist",
-        "--no-check-certificates",
-        ...RuntimeDetector.getRuntimeArgs(),
-        ...CookieManager.getAuthArgs(),
-        normalizedUrl,
-      ];
+    const cached = MetadataCache.get(normalizedUrl);
+    if (cached) return cached;
 
-      Logger.info(`INFO Fetching metadata for ${normalizedUrl}`);
-      try {
-        const { stdout } = await execFileAsync(ytDlpPath, args, {
-          maxBuffer: 10 * 1024 * 1024, // 10MB buffer for large JSON payloads
+    return RequestManager.deduplicate(`info:${normalizedUrl}`, async () => {
+      const result = await DownloadQueue.enqueue(async () => {
+        return RetryManager.retry(async () => {
+          const args = [
+            "-J",
+            "--no-playlist",
+            "--no-check-certificates",
+            ...RuntimeDetector.getRuntimeArgs(),
+            ...CookieManager.getAuthArgs(),
+            normalizedUrl,
+          ];
+
+          Logger.info(`INFO Fetching metadata for ${normalizedUrl}`);
+          try {
+            const { stdout } = await execFileAsync(ytDlpPath, args, {
+              maxBuffer: 10 * 1024 * 1024,
+            });
+            return JSON.parse(stdout);
+          } catch (err: unknown) {
+            const error = err as { stderr?: string; message?: string };
+            const stderr = error.stderr || error.message || "";
+            const parsed = parseYtDlpError(stderr);
+            Logger.error(`ERROR Failed to fetch metadata: ${parsed.message}`, parsed);
+            throw parsed;
+          }
         });
-        return JSON.parse(stdout);
-      } catch (err: unknown) {
-        const error = err as { stderr?: string; message?: string };
-        const stderr = error.stderr || error.message || "";
-        const parsed = parseYtDlpError(stderr);
-        Logger.error(`ERROR Failed to fetch metadata: ${parsed.message}`, parsed);
-        throw parsed;
-      }
+      });
+      MetadataCache.set(normalizedUrl, result);
+      return result;
     });
   }
 
@@ -191,71 +202,91 @@ export class DownloaderService {
     Logger.info(`INFO Download started: mode=${options.downloadMode}, url=${normalizedUrl}`);
 
     if (isTempFile) {
-      // Execute the downloader process inside a retry loop for reliability
-      await RetryManager.retry(async () => {
-        return new Promise<void>((resolve, reject) => {
-          const ytProcess = spawn(ytDlpPath, args);
-          let stderr = "";
+      await DownloadQueue.acquire();
+      let acquired = true;
+      try {
+        // Execute the downloader process inside a retry loop for reliability
+        await RetryManager.retry(async () => {
+          return new Promise<void>((resolve, reject) => {
+            const ytProcess = spawn(ytDlpPath, args);
+            let stderr = "";
 
-          ytProcess.stderr.on("data", (chunk) => {
-            stderr += chunk.toString();
-          });
+            ytProcess.stderr.on("data", (chunk) => {
+              stderr += chunk.toString();
+            });
 
-          ytProcess.on("close", (code) => {
-            if (code === 0) {
-              resolve();
-            } else {
-              const parsed = parseYtDlpError(stderr);
-              Logger.error(`ERROR Download process failed: ${parsed.message}`, parsed);
-              reject(parsed);
-            }
-          });
+            ytProcess.on("close", (code) => {
+              if (code === 0) {
+                resolve();
+              } else {
+                const parsed = parseYtDlpError(stderr);
+                Logger.error(`ERROR Download process failed: ${parsed.message}`, parsed);
+                reject(parsed);
+              }
+            });
 
-          ytProcess.on("error", (err) => {
-            reject(new DownloaderError("UNKNOWN", err.message, err));
+            ytProcess.on("error", (err) => {
+              reject(new DownloaderError("UNKNOWN", err.message, err));
+            });
           });
         });
-      });
 
-      const stat = fs.statSync(tempPath);
+        // Process finished, release queue slot early
+        DownloadQueue.release();
+        acquired = false;
 
-      // Create stream to read from temp file and cleanup afterwards
-      const stream = new ReadableStream({
-        start(controller) {
-          const fileStream = fs.createReadStream(tempPath);
-          fileStream.on("data", (chunk) => controller.enqueue(chunk));
-          fileStream.on("end", () => {
-            controller.close();
+        const stat = fs.statSync(tempPath);
+
+        // Create stream to read from temp file and cleanup afterwards
+        const stream = new ReadableStream({
+          start(controller) {
+            const fileStream = fs.createReadStream(tempPath);
+            fileStream.on("data", (chunk) => controller.enqueue(chunk));
+            fileStream.on("end", () => {
+              controller.close();
+              try {
+                fs.unlinkSync(tempPath);
+              } catch {
+                // Ignore
+              }
+            });
+            fileStream.on("error", (err) => {
+              controller.error(err);
+              try {
+                fs.unlinkSync(tempPath);
+              } catch {
+                // Ignore
+              }
+            });
+          },
+          cancel() {
             try {
               fs.unlinkSync(tempPath);
             } catch {
               // Ignore
             }
-          });
-          fileStream.on("error", (err) => {
-            controller.error(err);
-            try {
-              fs.unlinkSync(tempPath);
-            } catch {
-              // Ignore
-            }
-          });
-        },
-        cancel() {
-          try {
-            fs.unlinkSync(tempPath);
-          } catch {
-            // Ignore
-          }
-        },
-      });
+          },
+        });
 
-      return {
-        stream,
-        filename,
-        contentLength: stat.size,
-      };
+        return {
+          stream,
+          filename,
+          contentLength: stat.size,
+        };
+      } catch (e) {
+        if (acquired) DownloadQueue.release();
+        throw e;
+      }
     } else {
+      await DownloadQueue.acquire();
+      let isReleased = false;
+      const releaseQueue = () => {
+        if (!isReleased) {
+          isReleased = true;
+          DownloadQueue.release();
+        }
+      };
+
       // Direct stream download
       const ytProcess = spawn(ytDlpPath, args);
       let stderr = "";
@@ -283,6 +314,7 @@ export class DownloaderService {
               }
               isClosed = true;
             }
+            releaseQueue();
           });
 
           ytProcess.on("error", (err) => {
@@ -290,10 +322,12 @@ export class DownloaderService {
               controller.error(new DownloaderError("UNKNOWN", err.message, err));
               isClosed = true;
             }
+            releaseQueue();
           });
         },
         cancel() {
           ytProcess.kill();
+          releaseQueue();
         },
       });
 

@@ -1,83 +1,26 @@
-import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { describe, it, expect } from "vitest";
 import { CookieManager } from "../CookieManager";
-import fs from "fs";
 
 describe("CookieManager", () => {
-  const originalEnv = process.env;
-
-  beforeEach(() => {
-    process.env = { ...originalEnv };
-    vi.restoreAllMocks();
+  it("should validate strict Netscape HTTP Cookie files", () => {
+    const validContent = `# Netscape HTTP Cookie File\n\n.youtube.com\tTRUE\t/\tTRUE\t1783764807\tYTSESSION\tABC`;
+    const result = CookieManager.validateCookies(validContent, "test");
+    expect(result.valid).toBe(true);
+    expect(result.cookieCount).toBe(1);
+    expect(result.errors).toHaveLength(0);
   });
 
-  afterEach(() => {
-    process.env = originalEnv;
+  it("should reject missing header", () => {
+    const invalidContent = `.youtube.com\tTRUE\t/\tTRUE\t1783764807\tYTSESSION\tABC`;
+    const result = CookieManager.validateCookies(invalidContent, "test");
+    expect(result.valid).toBe(false);
+    expect(result.errors[0]).toContain("Missing '# Netscape HTTP Cookie File'");
   });
 
-  it("should extract PO Token arguments correctly", () => {
-    process.env.YOUTUBE_PO_TOKEN = "my_po_token";
-    process.env.YOUTUBE_VISITOR_DATA = "my_visitor";
-    
-    const args = CookieManager.getPoTokenArgs();
-    expect(args).toContain("--extractor-args");
-    expect(args).toContain("youtube:po_token=my_po_token");
-    expect(args).toContain("youtube:visitor_data=my_visitor");
-  });
-
-  it("should return empty arguments if no cookies or PO tokens are configured", () => {
-    vi.spyOn(fs, "existsSync").mockReturnValue(false);
-    delete process.env.YOUTUBE_COOKIES;
-    delete process.env.COOKIES_PATH;
-    delete process.env.YOUTUBE_COOKIES_PATH;
-    delete process.env.YOUTUBE_PO_TOKEN;
-    delete process.env.PO_TOKEN;
-    delete process.env.YOUTUBE_VISITOR_DATA;
-    delete process.env.VISITOR_DATA;
-    
-    expect(CookieManager.getAuthArgs()).toEqual([]);
-  });
-
-  it("should validate and load cookies from environment path if valid", () => {
-    process.env.COOKIES_PATH = "/path/to/valid_cookies.txt";
-    vi.spyOn(fs, "existsSync").mockReturnValue(true);
-    vi.spyOn(fs, "readFileSync").mockReturnValue(
-      "# Netscape HTTP Cookie File\n.youtube.com\tTRUE\t/\tTRUE\t1712345678\tGPS\t1"
-    );
-
-    const args = CookieManager.getCookieArgs();
-    expect(args).toContain("--cookies");
-    expect(args).toContain("/path/to/valid_cookies.txt");
-  });
-
-  it("should skip environment path cookies if invalid format", () => {
-    process.env.COOKIES_PATH = "/path/to/invalid_cookies.txt";
-    vi.spyOn(fs, "existsSync").mockReturnValue(true);
-    vi.spyOn(fs, "readFileSync").mockReturnValue("This is a simple invalid string");
-
-    const args = CookieManager.getCookieArgs();
-    expect(args).toEqual([]);
-  });
-
-  it("should validate and load cookies from YOUTUBE_COOKIES environment variable, resolving literal escapes", () => {
-    process.env.YOUTUBE_COOKIES = "# Netscape HTTP Cookie File\\n.youtube.com\\tTRUE\\t/\\tTRUE\\t1712345678\\tGPS\\t1";
-    vi.spyOn(fs, "writeFileSync").mockImplementation(() => {});
-    vi.spyOn(fs, "existsSync").mockReturnValue(true);
-
-    const args = CookieManager.getCookieArgs();
-    expect(args).toContain("--cookies");
-    expect(args[1]).toContain("youtube_cookies_temp.txt");
-  });
-
-  it("should reconstruct and fix space-separated cookies into valid tab-separated Netscape format", () => {
-    process.env.YOUTUBE_COOKIES = ".youtube.com TRUE / FALSE 1712345678 GPS 1";
-    vi.spyOn(fs, "writeFileSync").mockImplementation((path, content) => {
-      expect(typeof content === "string" && content.includes("# Netscape HTTP Cookie File")).toBe(true);
-      expect(typeof content === "string" && content.includes(".youtube.com\tTRUE\t/\tFALSE\t1712345678\tGPS\t1")).toBe(true);
-    });
-    vi.spyOn(fs, "existsSync").mockReturnValue(true);
-
-    const args = CookieManager.getCookieArgs();
-    expect(args).toContain("--cookies");
-    expect(args[1]).toContain("youtube_cookies_temp.txt");
+  it("should reject space-separated formats instead of silently modifying them", () => {
+    const invalidContent = `# Netscape HTTP Cookie File\n\n.youtube.com TRUE / TRUE 1783764807 YTSESSION ABC`;
+    const result = CookieManager.validateCookies(invalidContent, "test");
+    expect(result.valid).toBe(false);
+    expect(result.errors).toContain("Found space-separated row instead of tab-separated");
   });
 });

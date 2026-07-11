@@ -3,215 +3,216 @@ import path from "path";
 import os from "os";
 import { Logger } from "./Logger";
 
+export interface CookieValidationResult {
+  valid: boolean;
+  source: string;
+  cookieCount: number;
+  errors: string[];
+}
+
 export class CookieManager {
   private static tempCookiePath: string | null = null;
+  private static isCleanupRegistered = false;
+  private static loadedSource = "✗ Not configured";
+  private static loadedFormat = "";
+  private static loadedBase64 = false;
+  private static loadedCount = 0;
 
-  /**
-   * Returns the --cookies arguments if cookies are configured.
-   * Otherwise returns an empty array.
-   */
   static getCookieArgs(): string[] {
-    const cookiePath = this.resolveCookiePath();
-    if (cookiePath) {
-      return ["--cookies", cookiePath];
+    if (!this.tempCookiePath) {
+      this.loadCookies().catch(err => Logger.error("Error loading cookies async", err));
+      // Fallback synchronous load if needed, but typically loadCookies is called during initialize
     }
-    return [];
+    return this.tempCookiePath ? ["--cookies", this.tempCookiePath] : [];
   }
 
-  /**
-   * Returns the PO token arguments if YOUTUBE_PO_TOKEN or PO_TOKEN is set.
-   * Otherwise returns an empty array.
-   */
   static getPoTokenArgs(): string[] {
     const poToken = process.env.YOUTUBE_PO_TOKEN || process.env.PO_TOKEN;
     const visitorData = process.env.YOUTUBE_VISITOR_DATA || process.env.VISITOR_DATA;
     const args: string[] = [];
-
-    if (poToken) {
-      args.push("--extractor-args", `youtube:po_token=${poToken}`);
-    }
-    if (visitorData) {
-      args.push("--extractor-args", `youtube:visitor_data=${visitorData}`);
-    }
-
+    if (poToken) args.push("--extractor-args", `youtube:po_token=${poToken}`);
+    if (visitorData) args.push("--extractor-args", `youtube:visitor_data=${visitorData}`);
     return args;
   }
 
-  /**
-   * Returns the combined cookies and PO Token arguments for authentication.
-   */
   static getAuthArgs(): string[] {
     return [...this.getCookieArgs(), ...this.getPoTokenArgs()];
   }
 
-  /**
-   * Returns a diagnostics message for the health check.
-   */
   static getDiagnostics(): string {
-    const cookiePath = this.resolveCookiePath();
-    const hasPoToken = !!(process.env.YOUTUBE_PO_TOKEN || process.env.PO_TOKEN);
-    const hasVisitor = !!(process.env.YOUTUBE_VISITOR_DATA || process.env.VISITOR_DATA);
-
-    const parts: string[] = [];
-    if (cookiePath) {
-      if (process.env.YOUTUBE_COOKIES) {
-        parts.push(`Cookies: ✓ loaded from YOUTUBE_COOKIES env var`);
-      } else if (process.env.COOKIES_PATH || process.env.YOUTUBE_COOKIES_PATH) {
-        parts.push(`Cookies: ✓ loaded from path: ${cookiePath}`);
-      } else {
-        parts.push(`Cookies: ✓ loaded from cookies.txt`);
-      }
-    } else {
-      parts.push(`Cookies: ✗ Not configured`);
-    }
-
-    if (hasPoToken) {
-      parts.push(`PO Token: ✓ configured${hasVisitor ? " (with Visitor Data)" : ""}`);
-    } else {
-      parts.push(`PO Token: ✗ Not configured`);
-    }
-
-    return parts.join(" | ");
+    const hasPo = !!(process.env.YOUTUBE_PO_TOKEN || process.env.PO_TOKEN);
+    const poStr = `PO Token: ${hasPo ? "✓ configured" : "✗ Not configured"}`;
+    return `Cookies: ${this.loadedSource} | ${poStr}`;
   }
 
-  /**
-   * Validates if the content conforms to the Netscape HTTP Cookie File format.
-   */
-  private static isValidNetscapeCookies(content: string): boolean {
-    if (content.includes("# Netscape HTTP Cookie File")) {
-      return true;
-    }
-    
-    // Check if it has tab-separated values containing typical cookies fields
-    const lines = content.split("\n");
-    for (const line of lines) {
-      const trimmed = line.trim();
-      if (!trimmed || trimmed.startsWith("#")) continue;
-      const parts = trimmed.split("\t");
-      if (parts.length >= 7) {
-        return true;
-      }
-    }
-    
-    return false;
+  static getDetailedDiagnostics() {
+    return {
+      cookieSource: this.loadedSource,
+      cookieFormat: this.loadedFormat,
+      base64Decoded: this.loadedBase64,
+      cookieRowsFound: this.loadedCount,
+      tempFilePath: this.tempCookiePath,
+      validationPassed: this.loadedCount > 0,
+    };
   }
 
-  /**
-   * Parses cookie content line-by-line, converts space-separated fields into
-   * tab-separated ones if needed, and ensures the Netscape header is present.
-   */
-  private static parseAndReconstructCookies(content: string): string {
-    const lines = content.split(/\r?\n/);
-    const reconstructedLines: string[] = [];
-
-    // Ensure it starts with the valid Netscape header
-    reconstructedLines.push("# Netscape HTTP Cookie File");
-
-    for (const line of lines) {
-      const trimmed = line.trim();
-      if (!trimmed || trimmed.startsWith("#")) continue;
-
-      let parts = trimmed.split("\t");
-      if (parts.length < 7) {
-        // Fallback to space-separation if tabs are not present
-        parts = trimmed.split(/\s+/);
-      }
-
-      if (parts.length >= 7) {
-        const isFlag1 = parts[1] === "TRUE" || parts[1] === "FALSE";
-        const isFlag2 = parts[3] === "TRUE" || parts[3] === "FALSE";
-        const isExpiry = /^\d+$/.test(parts[4]);
-
-        if (isFlag1 && isFlag2 && isExpiry) {
-          const standardFields = parts.slice(0, 6);
-          const valueField = parts.slice(6).join(" ");
-          reconstructedLines.push([...standardFields, valueField].join("\t"));
-        }
-      }
+  static async loadCookies(): Promise<void> {
+    if (!this.isCleanupRegistered) {
+      this.registerCleanup();
     }
 
-    return reconstructedLines.join("\n");
-  }
+    if (this.tempCookiePath && fs.existsSync(this.tempCookiePath)) {
+      return;
+    }
 
-  /**
-   * Resolves the path to the cookies file, creating a temporary file if needed.
-   * Returns null if cookies are missing or invalid.
-   */
-  private static resolveCookiePath(): string | null {
-    // 1. Check YOUTUBE_COOKIES env variable
+    // Source 1: YOUTUBE_COOKIES env var
     if (process.env.YOUTUBE_COOKIES) {
-      try {
-        if (this.tempCookiePath && fs.existsSync(this.tempCookiePath)) {
-          return this.tempCookiePath;
-        }
+      let content = process.env.YOUTUBE_COOKIES;
+      
+      const isBase64 = /^[a-zA-Z0-9+/={}\s]+$/.test(content) && !content.includes("\t") && !content.includes("\n");
+      if (isBase64) {
+        content = this.decodeCookies(content);
+        this.loadedBase64 = true;
+      } else {
+        this.loadedBase64 = false;
+      }
 
-        let cookieContent = process.env.YOUTUBE_COOKIES.trim();
-        
-        // If it looks like base64, decode it
-        if (/^[a-zA-Z0-9+/={}\s]+$/.test(cookieContent) && !cookieContent.includes("\t") && !cookieContent.includes("\n")) {
-          try {
-            const decoded = Buffer.from(cookieContent, "base64").toString("utf-8");
-            cookieContent = decoded;
-          } catch {
-            // Ignore, use raw
-          }
-        }
+      content = this.normalizeCookies(content);
+      const validation = this.validateCookies(content, "YOUTUBE_COOKIES env var");
 
-        // Unescape literal control characters (e.g. \n, \r, \t) from cloud provider environments
-        cookieContent = cookieContent
-          .replace(/\\n/g, "\n")
-          .replace(/\\r/g, "\r")
-          .replace(/\\t/g, "\t");
-
-        const reconstructedContent = this.parseAndReconstructCookies(cookieContent);
-
-        if (this.isValidNetscapeCookies(reconstructedContent)) {
-          const tempDir = os.tmpdir();
-          const tempPath = path.join(tempDir, "youtube_cookies_temp.txt");
-          fs.writeFileSync(tempPath, reconstructedContent, "utf-8");
-          this.tempCookiePath = tempPath;
-          Logger.info("Cookies validated, formatted, and loaded from YOUTUBE_COOKIES env var.");
-          return tempPath;
-        } else {
-          Logger.warn("YOUTUBE_COOKIES content is not a valid Netscape cookies format.");
-        }
-      } catch (err) {
-        Logger.error("Failed to parse/write YOUTUBE_COOKIES", err);
+      if (validation.valid) {
+        await this.writeTempFile(content, validation);
+        return;
+      } else {
+        Logger.warn(`YOUTUBE_COOKIES validation failed: ${validation.errors.join(", ")}`);
       }
     }
 
-    // 2. Check COOKIES_PATH or YOUTUBE_COOKIES_PATH
+    // Source 2: COOKIES_PATH
     const envPath = process.env.COOKIES_PATH || process.env.YOUTUBE_COOKIES_PATH;
     if (envPath && fs.existsSync(envPath)) {
-      try {
-        const content = fs.readFileSync(envPath, "utf-8");
-        if (this.isValidNetscapeCookies(content)) {
-          Logger.info(`Cookies validated and loaded from path: ${envPath}`);
-          return envPath;
-        } else {
-          Logger.warn(`Cookies file at ${envPath} is not a valid Netscape cookies format.`);
-        }
-      } catch (err) {
-        Logger.error(`Failed to read cookies from path: ${envPath}`, err);
+      const content = this.normalizeCookies(await fs.promises.readFile(envPath, "utf8"));
+      const validation = this.validateCookies(content, `COOKIES_PATH (${envPath})`);
+      if (validation.valid) {
+        await this.writeTempFile(content, validation);
+        return;
       }
     }
 
-    // 3. Check for cookies.txt in the current working directory
+    // Source 3: default cookies.txt
     const defaultPath = path.join(process.cwd(), "cookies.txt");
     if (fs.existsSync(defaultPath)) {
-      try {
-        const content = fs.readFileSync(defaultPath, "utf-8");
-        if (this.isValidNetscapeCookies(content)) {
-          Logger.info("Cookies validated and loaded from default cookies.txt in workspace root.");
-          return defaultPath;
-        } else {
-          Logger.warn("Default cookies.txt is not a valid Netscape cookies format.");
-        }
-      } catch (err) {
-        Logger.error("Failed to read default cookies.txt", err);
+      const content = this.normalizeCookies(await fs.promises.readFile(defaultPath, "utf8"));
+      const validation = this.validateCookies(content, "cookies.txt (workspace root)");
+      if (validation.valid) {
+        await this.writeTempFile(content, validation);
+        return;
+      }
+    }
+  }
+
+  static validateCookies(text: string, source: string): CookieValidationResult {
+    const result: CookieValidationResult = {
+      valid: false,
+      source,
+      cookieCount: 0,
+      errors: [],
+    };
+
+    if (!text.startsWith("# Netscape HTTP Cookie File")) {
+      result.errors.push("Missing '# Netscape HTTP Cookie File' header at start");
+    }
+
+    const lines = text.split("\n");
+    for (const line of lines) {
+      const trimmed = line.trim();
+      if (!trimmed || trimmed.startsWith("#")) continue;
+
+      const parts = line.split("\t");
+      if (parts.length >= 7) {
+        result.cookieCount++;
+      } else if (line.includes(" ")) {
+        // Warning for space-separated files
+        result.errors.push("Found space-separated row instead of tab-separated");
       }
     }
 
-    return null;
+    if (result.cookieCount === 0) {
+      result.errors.push("No valid tab-separated cookie rows found");
+    }
+
+    result.valid = result.errors.length === 0 && result.cookieCount > 0;
+    return result;
+  }
+
+  private static decodeCookies(text: string): string {
+    try {
+      return Buffer.from(text, "base64").toString("utf-8");
+    } catch {
+      return text;
+    }
+  }
+
+  private static normalizeCookies(text: string): string {
+    // Unescape literal escapes
+    let normalized = text
+      .replace(/\\n/g, "\n")
+      .replace(/\\r/g, "\r")
+      .replace(/\\t/g, "\t");
+
+    // Convert CRLF to LF
+    normalized = normalized.replace(/\r\n/g, "\n");
+    
+    return normalized;
+  }
+
+  private static async writeTempFile(content: string, validation: CookieValidationResult): Promise<void> {
+    const tempDir = os.tmpdir();
+    const tempPath = path.join(tempDir, `yt_cookies_${Date.now()}.txt`);
+
+    try {
+      await fs.promises.writeFile(tempPath, content, "utf8");
+
+      // Verify the written file byte-for-byte read back
+      const readBack = await fs.promises.readFile(tempPath, "utf8");
+      const check = this.validateCookies(readBack, validation.source);
+
+      if (!check.valid) {
+        await fs.promises.unlink(tempPath).catch(() => {});
+        throw new Error(`Temp file verification failed: ${check.errors.join(", ")}`);
+      }
+
+      this.tempCookiePath = tempPath;
+      this.loadedSource = `✓ loaded from ${validation.source}`;
+      this.loadedFormat = "Netscape HTTP Cookie File";
+      this.loadedCount = validation.cookieCount;
+      Logger.info(`INFO Cookies verified and loaded: ${validation.cookieCount} rows from ${validation.source}`);
+    } catch (err) {
+      Logger.error("Failed to safely write cookies temp file", err);
+    }
+  }
+
+  static cleanup() {
+    if (this.tempCookiePath && fs.existsSync(this.tempCookiePath)) {
+      try {
+        fs.unlinkSync(this.tempCookiePath);
+        this.tempCookiePath = null;
+      } catch {
+        // Ignore cleanup errors
+      }
+    }
+  }
+
+  private static registerCleanup() {
+    this.isCleanupRegistered = true;
+    process.on("exit", () => this.cleanup());
+    process.on("SIGINT", () => {
+      this.cleanup();
+      process.exit(0);
+    });
+    process.on("SIGTERM", () => {
+      this.cleanup();
+      process.exit(0);
+    });
   }
 }

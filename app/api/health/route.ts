@@ -3,48 +3,45 @@ import { execSync } from "child_process";
 import { RuntimeDetector } from "../../../lib/downloader/RuntimeDetector";
 import { CookieManager } from "../../../lib/downloader/CookieManager";
 import { DownloaderService } from "../../../lib/downloader/DownloaderService";
+import { MetadataCache } from "../../../lib/downloader/MetadataCache";
+import { DownloadQueue } from "../../../lib/downloader/DownloadQueue";
 
 export async function GET() {
-  let ytDlp = "✗ Not found or not executable";
+  let ytDlpVersion = "Not found or not executable";
   try {
     const ytdlpPath = DownloaderService.getYtDlpPath();
-    ytDlp = execSync(`"${ytdlpPath}" --version`, { stdio: ["ignore", "pipe", "ignore"] })
+    ytDlpVersion = execSync(`"${ytdlpPath}" --version`, { stdio: ["ignore", "pipe", "ignore"] })
       .toString()
       .trim();
   } catch {
     // Ignore
   }
 
-  const runtime = RuntimeDetector.getFormattedRuntime() || "✗ None";
+  const runtime = RuntimeDetector.getFormattedRuntime() || "None";
 
-  let ffmpeg = "✗ Not found";
+  let ffmpegInstalled = false;
   try {
-    ffmpeg = execSync("ffmpeg -version", { stdio: ["ignore", "pipe", "ignore"] })
-      .toString()
-      .split("\n")[0]
-      .trim();
+    execSync("ffmpeg -version", { stdio: ["ignore", "pipe", "ignore"] });
+    ffmpegInstalled = true;
   } catch {
     // Ignore
   }
 
-  const cookies = CookieManager.getDiagnostics();
-  const platform = process.platform;
-  const nodeVersion = process.version;
-
-  const hasErrors =
-    ytDlp.startsWith("✗") ||
-    runtime.startsWith("✗") ||
-    ffmpeg.startsWith("✗");
+  const cookiesDiag = CookieManager.getDetailedDiagnostics();
+  const cookiesLoaded = cookiesDiag.validationPassed;
 
   return NextResponse.json(
     {
-      ytDlp,
+      ytDlpVersion,
+      ffmpegInstalled,
       runtime,
-      ffmpeg,
-      cookies,
-      platform,
-      nodeVersion,
+      cookiesLoaded,
+      queueLength: DownloadQueue.getQueueLength(),
+      activeDownloads: DownloadQueue.getActiveCount(),
+      cacheEntries: MetadataCache.getCacheCount(),
+      uptime: process.uptime(),
+      ...cookiesDiag,
     },
-    { status: hasErrors ? 503 : 200 }
+    { status: 200 }
   );
 }
