@@ -1,15 +1,16 @@
 import { NextResponse } from "next/server";
 import { execSync } from "child_process";
-import { DownloaderService } from "../../../lib/downloader/DownloaderService";
 import { RuntimeDetector } from "../../../lib/downloader/RuntimeDetector";
-import { CookieManager } from "../../../lib/downloader/CookieManager";
+import path from "path";
 
 export async function GET() {
   const results: Record<string, string> = {};
 
   // 1. Check yt-dlp
   try {
-    const ytdlpPath = DownloaderService.getYtDlpPath();
+    const ytdlpPath = process.platform === "win32"
+      ? path.join(process.cwd(), "yt-dlp.exe")
+      : "/usr/local/bin/yt-dlp";
     const version = execSync(`"${ytdlpPath}" --version`, { stdio: ["ignore", "pipe", "ignore"] }).toString().trim();
     results["yt-dlp"] = `✓ ${version}`;
   } catch {
@@ -29,7 +30,7 @@ export async function GET() {
   }
 
   // 4. Check cookies
-  results["cookies"] = CookieManager.getDiagnostics();
+  results["cookies"] = "Not configured"; // CookieManager removed
 
   // 5. Node.js version
   results["node"] = `✓ ${process.version}`;
