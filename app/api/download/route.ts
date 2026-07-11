@@ -9,7 +9,11 @@ export async function POST(req: NextRequest) {
 
     if (!url) return new Response("Missing URL", { status: 400 });
 
-    const args: string[] = ["--js-runtimes=node", "-f"];
+    const args: string[] = [
+      "--js-runtimes=node", 
+      "--no-check-certificates",
+      "-f"
+    ];
     let isTempFile = false;
     let tempPath = "";
 
@@ -20,8 +24,11 @@ export async function POST(req: NextRequest) {
       isTempFile = true;
       const fs = await import("fs");
       const os = await import("os");
-      tempPath = path.join(os.tmpdir(), `yt_dlp_${Date.now()}.mp3`);
-      args.push(formatId, "-x", "--audio-format", "mp3", "-o", tempPath, "--no-playlist");
+      const baseName = `yt_dlp_${Date.now()}`;
+      tempPath = path.join(os.tmpdir(), `${baseName}.mp3`); // Final converted file
+      const templatePath = path.join(os.tmpdir(), `${baseName}.%(ext)s`); // yt-dlp downloads to this, then converts
+      
+      args.push(formatId, "-x", "--audio-format", "mp3", "-o", templatePath, "--no-playlist");
     } else if (downloadMode === "video") {
       if (!formatId)
         return new Response("Missing video format", { status: 400 });
@@ -33,11 +40,14 @@ export async function POST(req: NextRequest) {
       isTempFile = true;
       const fs = await import("fs");
       const os = await import("os");
-      tempPath = path.join(os.tmpdir(), `yt_dlp_${Date.now()}.mkv`);
+      const baseName = `yt_dlp_${Date.now()}`;
+      tempPath = path.join(os.tmpdir(), `${baseName}.mkv`); // This is the final file we will read
+      const templatePath = path.join(os.tmpdir(), `${baseName}.%(ext)s`); // This is what we pass to yt-dlp
+
       args.push(
         `${videoFormatId}+${audioFormatId}`,
         "-o",
-        tempPath,
+        templatePath,
         "--merge-output-format",
         "mkv",
         "--no-playlist"

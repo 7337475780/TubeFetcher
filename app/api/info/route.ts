@@ -19,7 +19,7 @@ export async function POST(req: NextRequest) {
 
     // Fetch info in JSON format
     const { stdout } = await execAsync(
-      `"${ytDlpPath}" -J --no-playlist --js-runtimes node "${url}"`
+      `"${ytDlpPath}" -J --no-playlist --no-check-certificates --js-runtimes node "${url}"`
     );
 
     const info = JSON.parse(stdout);
