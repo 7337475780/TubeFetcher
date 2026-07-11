@@ -67,4 +67,17 @@ describe("CookieManager", () => {
     expect(args).toContain("--cookies");
     expect(args[1]).toContain("youtube_cookies_temp.txt");
   });
+
+  it("should reconstruct and fix space-separated cookies into valid tab-separated Netscape format", () => {
+    process.env.YOUTUBE_COOKIES = ".youtube.com TRUE / FALSE 1712345678 GPS 1";
+    vi.spyOn(fs, "writeFileSync").mockImplementation((path, content) => {
+      expect(typeof content === "string" && content.includes("# Netscape HTTP Cookie File")).toBe(true);
+      expect(typeof content === "string" && content.includes(".youtube.com\tTRUE\t/\tFALSE\t1712345678\tGPS\t1")).toBe(true);
+    });
+    vi.spyOn(fs, "existsSync").mockReturnValue(true);
+
+    const args = CookieManager.getCookieArgs();
+    expect(args).toContain("--cookies");
+    expect(args[1]).toContain("youtube_cookies_temp.txt");
+  });
 });

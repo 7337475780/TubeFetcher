@@ -97,6 +97,43 @@ export class CookieManager {
   }
 
   /**
+   * Parses cookie content line-by-line, converts space-separated fields into
+   * tab-separated ones if needed, and ensures the Netscape header is present.
+   */
+  private static parseAndReconstructCookies(content: string): string {
+    const lines = content.split(/\r?\n/);
+    const reconstructedLines: string[] = [];
+
+    // Ensure it starts with the valid Netscape header
+    reconstructedLines.push("# Netscape HTTP Cookie File");
+
+    for (const line of lines) {
+      const trimmed = line.trim();
+      if (!trimmed || trimmed.startsWith("#")) continue;
+
+      let parts = trimmed.split("\t");
+      if (parts.length < 7) {
+        // Fallback to space-separation if tabs are not present
+        parts = trimmed.split(/\s+/);
+      }
+
+      if (parts.length >= 7) {
+        const isFlag1 = parts[1] === "TRUE" || parts[1] === "FALSE";
+        const isFlag2 = parts[3] === "TRUE" || parts[3] === "FALSE";
+        const isExpiry = /^\d+$/.test(parts[4]);
+
+        if (isFlag1 && isFlag2 && isExpiry) {
+          const standardFields = parts.slice(0, 6);
+          const valueField = parts.slice(6).join(" ");
+          reconstructedLines.push([...standardFields, valueField].join("\t"));
+        }
+      }
+    }
+
+    return reconstructedLines.join("\n");
+  }
+
+  /**
    * Resolves the path to the cookies file, creating a temporary file if needed.
    * Returns null if cookies are missing or invalid.
    */
@@ -110,30 +147,30 @@ export class CookieManager {
 
         let cookieContent = process.env.YOUTUBE_COOKIES.trim();
         
+        // If it looks like base64, decode it
+        if (/^[a-zA-Z0-9+/={}\s]+$/.test(cookieContent) && !cookieContent.includes("\t") && !cookieContent.includes("\n")) {
+          try {
+            const decoded = Buffer.from(cookieContent, "base64").toString("utf-8");
+            cookieContent = decoded;
+          } catch {
+            // Ignore, use raw
+          }
+        }
+
         // Unescape literal control characters (e.g. \n, \r, \t) from cloud provider environments
         cookieContent = cookieContent
           .replace(/\\n/g, "\n")
           .replace(/\\r/g, "\r")
           .replace(/\\t/g, "\t");
 
-        // If it looks like base64, decode it
-        if (/^[a-zA-Z0-9+/={}\s]+$/.test(cookieContent) && !cookieContent.includes("\t") && !cookieContent.includes("\n")) {
-          try {
-            const decoded = Buffer.from(cookieContent, "base64").toString("utf-8");
-            if (this.isValidNetscapeCookies(decoded)) {
-              cookieContent = decoded;
-            }
-          } catch {
-            // Ignore, use raw
-          }
-        }
+        const reconstructedContent = this.parseAndReconstructCookies(cookieContent);
 
-        if (this.isValidNetscapeCookies(cookieContent)) {
+        if (this.isValidNetscapeCookies(reconstructedContent)) {
           const tempDir = os.tmpdir();
           const tempPath = path.join(tempDir, "youtube_cookies_temp.txt");
-          fs.writeFileSync(tempPath, cookieContent, "utf-8");
+          fs.writeFileSync(tempPath, reconstructedContent, "utf-8");
           this.tempCookiePath = tempPath;
-          Logger.info("Cookies validated and loaded from YOUTUBE_COOKIES env var.");
+          Logger.info("Cookies validated, formatted, and loaded from YOUTUBE_COOKIES env var.");
           return tempPath;
         } else {
           Logger.warn("YOUTUBE_COOKIES content is not a valid Netscape cookies format.");
